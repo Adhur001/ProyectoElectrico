@@ -1,33 +1,21 @@
 module ALU #(parameter SIZE = 32) (
-    input logic enable,
-    input logic [SIZE-1:0] in_A,
-    input logic [SIZE-1:0] in_B,
+    input  logic            enable,
+    input  logic [2:0]      alu_op,
+    input  logic [SIZE-1:0] in_A,
+    input  logic [SIZE-1:0] in_B,
     output logic [SIZE-1:0] out
-    );
-
-assign out = (enable) ? in_A + in_B : '0;
-
-endmodule
-
-module ALU_array #(parameter SIZE = 32) (
-    input  logic enable,
-    input  logic [SIZE-1:0] in_A1,
-    input  logic [SIZE-1:0] in_A2,
-    input  logic [SIZE-1:0] in_A3,
-    input  logic [SIZE-1:0] in_A4,
-    input  logic [SIZE-1:0] in_B1,
-    input  logic [SIZE-1:0] in_B2,
-    input  logic [SIZE-1:0] in_B3,
-    input  logic [SIZE-1:0] in_B4,
-    output logic [SIZE-1:0] out1,
-    output logic [SIZE-1:0] out2,
-    output logic [SIZE-1:0] out3,
-    output logic [SIZE-1:0] out4
 );
-
-ALU ALU1 (.enable(enable), .in_A(in_A1), .in_B(in_B1), .out(out1));
-ALU ALU2 (.enable(enable), .in_A(in_A2), .in_B(in_B2), .out(out2));
-ALU ALU3 (.enable(enable), .in_A(in_A3), .in_B(in_B3), .out(out3));
-ALU ALU4 (.enable(enable), .in_A(in_A4), .in_B(in_B4), .out(out4));
-
+    always @(*) begin
+        if (enable) begin
+            case (alu_op)
+                3'b000: out = in_A + in_B;  // ADD
+                3'b001: out = in_A - in_B;  // SUB
+                3'b010: out = in_A & in_B;  // AND
+                3'b011: out = in_A | in_B;  // OR
+                3'b100: out = in_A ^ in_B;  // XOR
+                default: out = '0;
+            endcase
+        end else
+            out = '0;
+    end
 endmodule

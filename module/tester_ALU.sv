@@ -15,25 +15,33 @@ initial begin
 
     addr_A = 0; addr_B = 0;
     enable = 0;
-    alu_op = 1;
     clk = 1;
 
     sel = 1; // registers are going to take dummy data
 
-    #10; // write dummy values in registers
+    #10; // write dummy values in register
     data_in = {4{32'hDEAD_BEEF}};
     addr_W = 5'd1;
 
-    #10 write = 1; // allows for writing
+    #5 write = 1; // allows for writing
 
     #10; // write on another register
     data_in = {4{32'h0404_9292}};
-    addr_W = 5'd1;
-
-    #10; // change the address 
-    data_in = {4{32'h0404_9292}};
     addr_W = 5'd2;
 
+    #10; // change the address 
+    // here i should enable the ALU and set a diferent address registers
+    write = 0; //going to read from registers
+    sel = 0; // registers take writeback value from the ALU
+    enable = 1;
+    alu_op = 0;
+    addr_A = 5'd1;
+    addr_B = 5'd2;
+    enable = 1; // allow ALU to perform operation
+
+    #10;// allow for write back
+    write = 1;
+    addr_W = 5'd3;     
     #20 $finish;
 end
 

@@ -1,4 +1,4 @@
-`include "ALU/ALU.sv"
+`include "ALU/ALU_array.sv"
 `include "Vregisters/vregisters.sv"
 
 module temp_wrapper (
@@ -10,7 +10,7 @@ module temp_wrapper (
     input logic         wr_en,
     input logic         sel,
     input logic         enable_ALU,
-    input logic [2:0]   alu_op       // <-- added
+    input logic [2:0]   alu_op       
 );
 
     logic [127:0] vs1_data, vs2_data, vd_data_wb, data_selected;

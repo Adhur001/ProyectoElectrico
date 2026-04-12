@@ -5,7 +5,7 @@
 
 ## Overview
 
-This ISA is designed for an educational lane-based SIMT Streaming Multiprocessor (SM).
+This ISA is designed for an educational vector extension processor.
 It extends a RISC-V 32-bit fixed-width instruction encoding with vector operations.
 Each instruction operates on **N lanes** in parallel, where N is a hardware parameter (default 4).
 
@@ -136,7 +136,7 @@ The decode stage produces a 3-bit `alu_op` signal from `funct3`:
 
 ```
 ┌─────────┐    ┌─────────┐    ┌─────────────┐    ┌───────────┐
-│  FETCH  │───▶│ DECODE  │───▶│   EXECUTE   │───▶│ WRITEBACK │
+│  FETCH  │──▶│ DECODE  │──▶│   EXECUTE   │──▶│ WRITEBACK │
 │         │    │         │    │  ALU_array  │    │ vregisters│
 │ imem[PC]│    │ vdecode │    │ valu_control│    │           │
 │ PC+4    │    │         │    │             │    │           │

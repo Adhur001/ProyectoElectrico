@@ -1,17 +1,35 @@
-`include "ALU/ALU_array.sv"
+`include "core/ALU.sv"
+`include "core/decode.sv"
 `include "Vregisters/vregisters.sv"
 
 module temp_wrapper (
     input logic         clk,
-    input logic [4:0]   addr_vs1,
-    input logic [4:0]   addr_vs2,
-    input logic [4:0]   addr_vd,
+    input logic         reset,
+    input logic         enable_decode,
+    input logic [31:0]  instruction,
     input logic [127:0] dummy_data_in,
-    input logic         wr_en,
-    input logic         sel,
-    input logic         enable_ALU,
-    input logic [2:0]   alu_op       
+    input logic         sel
 );
+
+    logic [4:0] addr_vs1;
+    logic [4:0] addr_vs2;
+    logic [4:0] addr_vd;
+    logic       wr_en;
+    logic       enable_ALU;
+    logic [2:0] alu_op;
+
+    decode_unit decoder (
+        .clk          (clk),
+        .enable_decode(enable_decode),
+        .reset        (reset),
+        .instruction  (instruction),
+        .alu_op       (alu_op),
+        .addr_A       (addr_vs1),
+        .addr_B       (addr_vs2),
+        .addr_W       (addr_vd),
+        .write        (wr_en),
+        .enable_ALU   (enable_ALU)
+    );
 
     logic [127:0] vs1_data, vs2_data, vd_data_wb, data_selected;
 

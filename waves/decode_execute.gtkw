@@ -1,0 +1,57 @@
+[*]
+[*] GTKWave Analyzer v3.3.126 (w)1999-2026 BSI
+[*] Sun Apr 19 21:56:30 2026
+[*]
+[dumpfile] "/home/erosk/Documents/I_2026/Proyecto_Electrico/ProyectoElectrico/testbenches/waves.vcd"
+[dumpfile_mtime] "Sun Apr 19 21:45:08 2026"
+[dumpfile_size] 30202
+[savefile] "/home/erosk/Documents/I_2026/Proyecto_Electrico/ProyectoElectrico/waves/decode_execute.gtkw"
+[timestart] 0
+[size] 1233 701
+[pos] -1 -1
+*-4.160965 40 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1 -1
+[treeopen] decode_execute_tb.
+[treeopen] decode_execute_tb.DUT.
+[treeopen] decode_execute_tb.DUT.alu.alu_lanes[0].
+[treeopen] decode_execute_tb.DUT.Vregs.
+[treeopen] decode_execute_tb.DUT.Vregs.reg_array[3].
+[treeopen] decode_execute_tb.DUT.Vregs.reg_array[4].
+[sst_width] 209
+[signals_width] 190
+[sst_expanded] 1
+[sst_vpaned_height] 308
+@28
+decode_execute_tb.clk
+decode_execute_tb.reset
+decode_execute_tb.sel
+@22
+decode_execute_tb.dummy_addr[4:0]
+decode_execute_tb.dummy_data_in[127:0]
+decode_execute_tb.DUT.Vregs.reg_array[6].reg_inst.register[127:0]
+decode_execute_tb.DUT.Vregs.reg_array[7].reg_inst.register[127:0]
+decode_execute_tb.instruction[31:0]
+@28
+decode_execute_tb.enable_decode
+@22
+decode_execute_tb.DUT.decoder.addr_A[4:0]
+decode_execute_tb.DUT.decoder.addr_B[4:0]
+decode_execute_tb.DUT.decoder.addr_W[4:0]
+@28
+decode_execute_tb.DUT.decoder.alu_op[2:0]
+decode_execute_tb.DUT.decoder.enable_ALU
+decode_execute_tb.DUT.decoder.write
+decode_execute_tb.DUT.alu.alu_op[2:0]
+@22
+decode_execute_tb.DUT.alu.alu_lanes[0].alu_inst.in_A[31:0]
+decode_execute_tb.DUT.alu.alu_lanes[0].alu_inst.in_B[31:0]
+decode_execute_tb.DUT.alu.alu_lanes[0].alu_inst.out[31:0]
+@28
+decode_execute_tb.DUT.Vregs.reg_array[4].reg_inst.write
+@22
+decode_execute_tb.DUT.Vregs.reg_array[4].reg_inst.register[127:0]
+@28
+decode_execute_tb.DUT.Vregs.reg_array[4].reg_inst.write
+@22
+decode_execute_tb.DUT.Vregs.reg_array[4].reg_inst.data_in[127:0]
+[pattern_trace] 1
+[pattern_trace] 0

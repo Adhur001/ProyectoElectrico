@@ -8,7 +8,7 @@ module vregister (
     logic [127:0] register;
 
     always @(posedge clk) begin
-        if (write)
+        if (write) // this condition might make it so the register has to wait for next clock edge
             register <= data_in;
     end
 

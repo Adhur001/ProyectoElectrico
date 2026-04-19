@@ -21,7 +21,7 @@ module decode_unit (
             write <= 1'b0;
             enable_ALU <= 1'b0;
         end else if (enable_decode) begin // for now ALU is always available
-            alu_op <= instruction[14:12];
+            alu_op <= instruction[28:26];
             addr_A <= instruction[19:15];
             addr_B <= instruction[24:20];
             addr_W <= instruction[11:7];

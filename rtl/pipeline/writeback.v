@@ -1,4 +1,4 @@
-module s3_writeback (
+module writeback (
     input         i_valid,
     input  [4:0]  i_rd,
     input  [127:0] i_result,

@@ -1,15 +1,13 @@
-module s2_execute (
+module execute (
     input         clk,
     input         rst,
 
-    // From Stage 1 pipeline registers
     input         i_valid,
     input  [2:0]  i_alu_op,
     input  [4:0]  i_rd,
     input  [127:0] i_vs1_data,
     input  [127:0] i_vs2_data,
 
-    // Pipeline registers → Stage 3
     output reg        o_valid,
     output reg [4:0]  o_rd,
     output reg [127:0] o_result

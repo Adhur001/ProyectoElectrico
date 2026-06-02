@@ -16,11 +16,12 @@ module vregisters (
         if (rst) begin
             for (j = 0; j < 32; j = j + 1)
                 regs[j] <= 128'b0;
-        end else if (we && (addr_w != 5'b0)) begin
+        end else if (we) begin
             regs[addr_w] <= data_in;
         end
     end
 
-    assign data_a = (addr_a == 5'b0) ? 128'b0 : regs[addr_a];
-    assign data_b = (addr_b == 5'b0) ? 128'b0 : regs[addr_b];
+    // v0 es el registro de mascara, puede leerse y escribirse libremente (spec RVV)
+    assign data_a = regs[addr_a];
+    assign data_b = regs[addr_b];
 endmodule

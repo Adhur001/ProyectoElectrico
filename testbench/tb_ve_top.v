@@ -101,15 +101,15 @@ module tb_ve_top;
         send_instr(1, 3'b100, 5'd7, 5'd8, 5'd11);
         check_reg(5'd11, {4{32'hFFFFFFFF}});
 
-        // -- v0 remains 0 even when targeted as rd --
-        $display("Test: write to v0 is discarded");
+        // -- v0 es un registro normal, acepta escritura (spec RVV) --
+        $display("Test: VADD v0 = v1 + v2 (v0 es escribible)");
         send_instr(1, 3'b000, 5'd1, 5'd2, 5'd0);
-        check_reg(5'd0, 128'b0);
+        check_reg(5'd0, {4{32'h1E}});  // 10+20 = 30 = 0x1E
 
-        // -- VADD with v0 as source: result = 0 + v2 = v2 --
-        $display("Test: VADD v12 = v0 + v2 (v0 as source)");
+        // -- VADD v12 = v0 + v2 : v0=30, v2=20 → 50 = 0x32 --
+        $display("Test: VADD v12 = v0 + v2 (v0 como fuente con valor 30)");
         send_instr(1, 3'b000, 5'd0, 5'd2, 5'd12);
-        check_reg(5'd12, {4{32'h14}});
+        check_reg(5'd12, {4{32'h32}});  // 30+20 = 50 = 0x32
 
         $display("=== Results: %0d passed, %0d failed ===", pass, fail);
         $finish;

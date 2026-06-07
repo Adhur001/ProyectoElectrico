@@ -1,19 +1,21 @@
 module ve_top (
-    input         clk,
-    input         rst,
-
-    input         i_valid,
-    input  [2:0]  i_funct3,
-    input  [4:0]  i_rs1,
-    input  [4:0]  i_rs2,
-    input  [4:0]  i_rd
+    input        clk,
+    input        rst,
+    input        i_valid,
+    input  [6:0] i_funct7,
+    input  [2:0] i_funct3,
+    input  [4:0] i_rs1,
+    input  [4:0] i_rs2,
+    input  [4:0] i_rd,
+    input        i_is_vx,
+    input [31:0] i_scalar
 );
-    wire [4:0]    addr_a, addr_b, addr_w;
-    wire [127:0]  data_a, data_b, data_in;
+    wire [4:0]   addr_a, addr_b, addr_w;
+    wire [127:0] data_a, data_b, data_in;
     wire          we;
 
     wire          s1_valid;
-    wire [2:0]    s1_alu_op;
+    wire [3:0]    s1_alu_op;
     wire [4:0]    s1_rd;
     wire [127:0]  s1_vs1_data, s1_vs2_data;
 
@@ -37,10 +39,13 @@ module ve_top (
         .clk        (clk),
         .rst        (rst),
         .i_valid    (i_valid),
+        .i_funct7   (i_funct7),
         .i_funct3   (i_funct3),
         .i_rs1      (i_rs1),
         .i_rs2      (i_rs2),
         .i_rd       (i_rd),
+        .i_is_vx    (i_is_vx),
+        .i_scalar   (i_scalar),
         .i_vs1_data (data_a),
         .i_vs2_data (data_b),
         .o_addr_a   (addr_a),

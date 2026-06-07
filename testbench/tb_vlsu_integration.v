@@ -32,6 +32,8 @@ module tb_vlsu_integration;
     wire [127:0] o_vrf_data;
     wire [127:0] i_vrf_rdata;
     wire [4:0]   o_vs3;
+    wire [127:0] i_vrf_offset;
+    wire [4:0]   o_vs2;
 
     wire         o_busy;
     wire         o_scoreboard_set;
@@ -80,6 +82,8 @@ module tb_vlsu_integration;
         .o_vrf_data       (o_vrf_data),
         .i_vrf_rdata      (i_vrf_rdata),
         .o_vs3            (o_vs3),
+        .i_vrf_offset     (i_vrf_offset),
+        .o_vs2            (o_vs2),
         .o_busy           (o_busy),
         .o_scoreboard_set (o_scoreboard_set),
         .o_scoreboard_clr (o_scoreboard_clr),
@@ -101,10 +105,14 @@ module tb_vlsu_integration;
         .we      (o_vrf_we),
         .addr_w  (o_vrf_addr),
         .data_in (o_vrf_data),
-        .addr_a  (o_vs3),       // el VLSU presenta o_vs3 para stores
-        .addr_b  (read_addr),   // puerto libre para verificacion
-        .data_a  (i_vrf_rdata), // dato de vs3 entra al VLSU
-        .data_b  (read_data)
+        .addr_a  (o_vs3),        // VLSU: lectura de vs3 (stores)
+        .addr_b  (read_addr),    // puerto libre para verificacion
+        .addr_c  (5'b0),         // no usado en este testbench
+        .addr_d  (o_vs2),        // VLSU: lectura de vs2 (indexed offsets)
+        .data_a  (i_vrf_rdata),  // dato de vs3 → VLSU
+        .data_b  (read_data),
+        .data_c  (),
+        .data_d  (i_vrf_offset)  // offsets de vs2 → VLSU
     );
 
     // -------------------------------------------------------------------------
@@ -299,6 +307,84 @@ module tb_vlsu_integration;
         $display("    mem[88]:   "); check(mem[88],  32'hCAFE_BABE);
         $display("    mem[96]:   "); check(mem[96],  32'h1234_5678);
         $display("    mem[104]:  "); check(mem[104], 32'h9ABC_DEF0);
+
+        // Re-inicializa mem[112] para indexed (test 5 lo tenia en D4D4D4D4)
+        // Esta asignacion ocurre en tiempo de simulacion, despues de que test 5 ya leyo mem[112]
+        mem[112] = 32'd0;
+        mem[116] = 32'd8;
+        mem[120] = 32'd4;
+        mem[124] = 32'd12;
+
+        // =================================================================
+        // TEST 7: VLE32.v v2, (x0)  base=112  — carga offsets en v2
+        //   v2 = {12, 4, 8, 0}   (offsets para accesos desordenados)
+        //   Instruccion: 32'h02006107
+        // =================================================================
+        @(posedge clk); #1;
+        $display("\n[TEST 7] VLE32.v v2, (x0)  base=112 → v2={12,4,8,0} (prep indexed)");
+
+        i_instr     = 32'h02006107;
+        i_base_addr = 32'd112;
+        i_valid     = 1;
+        @(posedge clk); #1; i_valid = 0;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+
+        read_addr = 5'd2; #1;
+        $display("  vregisters[2] tras carga:");
+        check(read_data, {32'd12, 32'd4, 32'd8, 32'd0});
+
+        // =================================================================
+        // TEST 8: vluxei32.v v9, (x0), v2  base=20
+        //   offsets en v2: {0, 8, 4, 12}
+        //   accede: mem[20+0]=1, mem[20+8]=3, mem[20+4]=2, mem[20+12]=4
+        //   esperado v9 = {4, 2, 3, 1}
+        //   Instruccion: 32'h06206487
+        // =================================================================
+        @(posedge clk); #1;
+        $display("\n[TEST 8] vluxei32.v v9, (x0), v2  base=20 → v9={4,2,3,1}");
+
+        i_instr     = 32'h06206487;
+        i_base_addr = 32'd20;
+        i_valid     = 1;
+        @(posedge clk); #1; i_valid = 0;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+
+        read_addr = 5'd9; #1;
+        $display("  vregisters[9] tras carga indexed:");
+        check(read_data, {32'd4, 32'd2, 32'd3, 32'd1});
+
+        // =================================================================
+        // TEST 9: vsuxei32.v v9, (x0), v2  base=70
+        //   offsets en v2: {0, 8, 4, 12} → escribe en mem[70,78,74,82]
+        //   v9 = {4,2,3,1} → mem[70]=1, mem[74]=3, mem[78]=2, mem[82]=4
+        //   Instruccion: 32'h062064A7
+        // =================================================================
+        @(posedge clk); #1;
+        $display("\n[TEST 9] vsuxei32.v v9, (x0), v2  base=70 → DCache[70,78,74,82]");
+
+        i_instr     = 32'h062064A7;
+        i_base_addr = 32'd70;
+        i_valid     = 1;
+        @(posedge clk); #1; i_valid = 0;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+        @(posedge clk); #1;
+
+        #1;
+        $display("  DCache tras store indexed de v9:");
+        $display("    mem[70]:  "); check(mem[70], 32'd1);
+        $display("    mem[78]:  "); check(mem[78], 32'd3);
+        $display("    mem[74]:  "); check(mem[74], 32'd2);
+        $display("    mem[82]:  "); check(mem[82], 32'd4);
 
         // =================================================================
         $display("\n=== Resultado: %0d PASS  %0d FAIL ===", pass, fail);

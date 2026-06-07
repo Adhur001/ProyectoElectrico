@@ -33,26 +33,32 @@ module tb_vlsu;
     wire        is_strided_load;
     wire        is_strided_store;
 
+    // indexed unordered
+    wire        is_indexed_load;
+    wire        is_indexed_store;
+
     vlsu_decoder dut (
-        .i_instr            (instr),
-        .o_vd               (vd),
-        .o_rs1              (rs1),
-        .o_rs2              (),
-        .o_width            (width),
-        .o_vm               (vm),
-        .o_lumop            (lumop),
-        .o_mop              (mop),
-        .o_nf               (nf),
-        .o_is_load          (is_load),
-        .o_is_unit_stride   (is_unit_stride),
-        .o_is_whole_reg     (is_whole_reg),
-        .o_is_mask_load     (is_mask_load),
-        .o_is_store         (is_store),
-        .o_is_unit_store    (is_unit_store),
-        .o_is_whole_store   (is_whole_store),
-        .o_is_mask_store    (is_mask_store),
-        .o_is_strided_load  (is_strided_load),
-        .o_is_strided_store (is_strided_store)
+        .i_instr             (instr),
+        .o_vd                (vd),
+        .o_rs1               (rs1),
+        .o_rs2               (),
+        .o_width             (width),
+        .o_vm                (vm),
+        .o_lumop             (lumop),
+        .o_mop               (mop),
+        .o_nf                (nf),
+        .o_is_load           (is_load),
+        .o_is_unit_stride    (is_unit_stride),
+        .o_is_whole_reg      (is_whole_reg),
+        .o_is_mask_load      (is_mask_load),
+        .o_is_store          (is_store),
+        .o_is_unit_store     (is_unit_store),
+        .o_is_whole_store    (is_whole_store),
+        .o_is_mask_store     (is_mask_store),
+        .o_is_strided_load   (is_strided_load),
+        .o_is_strided_store  (is_strided_store),
+        .o_is_indexed_load   (is_indexed_load),
+        .o_is_indexed_store  (is_indexed_store)
     );
 
     integer pass = 0, fail = 0;
@@ -225,6 +231,42 @@ module tb_vlsu;
         check_field(is_strided_store, 0,   "is_strided_store");
         check_field(is_mask_load,     0,   "is_mask_load    ");
         check_field(is_mask_store,    0,   "is_mask_store   ");
+
+        // -----------------------------------------------------------
+        // TEST 10: vluxei32.v v1, (x0), v2  — carga indexed unordered
+        //   mop=01, vd=v1, rs1=x0, vs2=v2
+        //   Hex: 32'h06206087
+        // -----------------------------------------------------------
+        instr = 32'h06206087;
+        #1;
+        $display("\n[TEST 10] vluxei32.v v1, (x0), v2  (carga indexed unordered)");
+        check_field(is_load,           1,   "is_load          ");
+        check_field(is_store,          0,   "is_store         ");
+        check_field(is_indexed_load,   1,   "is_indexed_load  ");
+        check_field(is_indexed_store,  0,   "is_indexed_store ");
+        check_field(is_strided_load,   0,   "is_strided_load  ");
+        check_field(is_unit_stride,    0,   "is_unit_stride   ");
+        check_field(vd,                1,   "vd               ");
+        check_field(rs1,               0,   "rs1              ");
+        check_field(mop,          2'b01,   "mop              ");
+
+        // -----------------------------------------------------------
+        // TEST 11: vsuxei32.v v1, (x0), v2  — store indexed unordered
+        //   mop=01, vs3=v1, rs1=x0, vs2=v2
+        //   Hex: 32'h062060A7
+        // -----------------------------------------------------------
+        instr = 32'h062060A7;
+        #1;
+        $display("\n[TEST 11] vsuxei32.v v1, (x0), v2  (store indexed unordered)");
+        check_field(is_load,           0,   "is_load          ");
+        check_field(is_store,          1,   "is_store         ");
+        check_field(is_indexed_load,   0,   "is_indexed_load  ");
+        check_field(is_indexed_store,  1,   "is_indexed_store ");
+        check_field(is_strided_store,  0,   "is_strided_store ");
+        check_field(is_unit_store,     0,   "is_unit_store    ");
+        check_field(vd,                1,   "vs3              ");
+        check_field(rs1,               0,   "rs1              ");
+        check_field(mop,          2'b01,   "mop              ");
 
         // -----------------------------------------------------------
         $display("\n=== Resultado: %0d PASS  %0d FAIL ===", pass, fail);

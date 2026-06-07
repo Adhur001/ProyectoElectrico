@@ -49,7 +49,11 @@ module vlsu_decoder (
 
     // tipo de instruccion — constant-stride (mop=10)
     output wire        o_is_strided_load, // VLSE<eew>.v
-    output wire        o_is_strided_store // VSSE<eew>.v
+    output wire        o_is_strided_store,// VSSE<eew>.v
+
+    // tipo de instruccion — indexed unordered (mop=01)
+    output wire        o_is_indexed_load, // vluxei<eew>.v
+    output wire        o_is_indexed_store // vsuxei<eew>.v
 );
 
     wire [6:0] opcode;
@@ -80,6 +84,10 @@ module vlsu_decoder (
     // Constant-stride (mop=10)
     assign o_is_strided_load  = o_is_load  && (o_mop == 2'b10);
     assign o_is_strided_store = o_is_store && (o_mop == 2'b10);
+
+    // Indexed unordered (mop=01)
+    assign o_is_indexed_load  = o_is_load  && (o_mop == 2'b01);
+    assign o_is_indexed_store = o_is_store && (o_mop == 2'b01);
 
 endmodule
 
@@ -119,8 +127,10 @@ module vlsu (
     output wire        o_vrf_we,          // write enable (cargas: writeback)
     output wire [4:0]  o_vrf_addr,        // indice del registro destino
     output wire [127:0] o_vrf_data,       // dato de 128 bits a escribir
-    input  wire [127:0] i_vrf_rdata,      // dato de 128 bits leido de vs3 (stores)
-    output wire [4:0]   o_vs3,            // indice del registro fuente para stores
+    input  wire [127:0] i_vrf_rdata,      // dato de 128 bits leido de vs3 (stores, puerto C)
+    output wire [4:0]   o_vs3,            // indice del registro fuente vs3 (stores)
+    input  wire [127:0] i_vrf_offset,     // dato de 128 bits leido de vs2 (indexed, puerto D)
+    output wire [4:0]   o_vs2,            // indice del registro de offsets vs2 (indexed)
 
     // Interfaz con scoreboard (en ve_top)
     output wire        o_busy,            // VLSU ocupado
@@ -133,18 +143,21 @@ module vlsu (
     // Instancia del decodificador
     // -------------------------------------------------------------------------
     wire [4:0]  dec_vd;
+    wire [4:0]  dec_vs2;
     wire        dec_is_load;
     wire        dec_is_store;
     wire        dec_is_mask_load;
     wire        dec_is_mask_store;
     wire        dec_is_strided_load;
     wire        dec_is_strided_store;
+    wire        dec_is_indexed_load;
+    wire        dec_is_indexed_store;
 
     vlsu_decoder decoder (
         .i_instr            (i_instr),
         .o_vd               (dec_vd),
         .o_rs1              (),
-        .o_rs2              (),
+        .o_rs2              (dec_vs2),
         .o_width            (),
         .o_vm               (),
         .o_lumop            (),
@@ -159,7 +172,9 @@ module vlsu (
         .o_is_whole_store   (),
         .o_is_mask_store    (dec_is_mask_store),
         .o_is_strided_load  (dec_is_strided_load),
-        .o_is_strided_store (dec_is_strided_store)
+        .o_is_strided_store (dec_is_strided_store),
+        .o_is_indexed_load  (dec_is_indexed_load),
+        .o_is_indexed_store (dec_is_indexed_store)
     );
 
     wire dec_valid_instr = dec_is_load || dec_is_store;
@@ -184,38 +199,48 @@ module vlsu (
     // -------------------------------------------------------------------------
     reg [3:0]   state;
     reg [4:0]   vd_reg;           // destino (carga) o fuente (store)
+    reg [4:0]   vs2_reg;          // registro de offsets capturado al inicio (indexed)
     reg [31:0]  base_addr_reg;    // direccion base capturada al inicio
     reg [31:0]  stride_reg;       // stride en bytes capturado al inicio (VLSE/VSSE)
     reg         is_mask_reg;      // operacion de mascara (VLM / VSM)
     reg         is_store_reg;     // indica que la operacion activa es un store
     reg         is_strided_reg;   // indica modo constant-stride (mop=10)
+    reg         is_indexed_reg;   // indica modo indexed (mop=01)
     reg [127:0] asm_buf;          // buffer de 128 bits (ensamblaje en carga, diseccion en store)
+    reg [127:0] offset_buf;       // offsets de vs2 capturados al inicio (indexed)
 
     // -------------------------------------------------------------------------
     // Logica secuencial
     // -------------------------------------------------------------------------
     always @(posedge clk) begin
         if (rst) begin
-            state         <= IDLE;
-            vd_reg        <= 5'b0;
-            base_addr_reg <= 32'b0;
-            stride_reg    <= 32'b0;
-            is_mask_reg   <= 1'b0;
-            is_store_reg  <= 1'b0;
-            is_strided_reg<= 1'b0;
-            asm_buf       <= 128'b0;
+            state          <= IDLE;
+            vd_reg         <= 5'b0;
+            vs2_reg        <= 5'b0;
+            base_addr_reg  <= 32'b0;
+            stride_reg     <= 32'b0;
+            is_mask_reg    <= 1'b0;
+            is_store_reg   <= 1'b0;
+            is_strided_reg <= 1'b0;
+            is_indexed_reg <= 1'b0;
+            asm_buf        <= 128'b0;
+            offset_buf     <= 128'b0;
         end else begin
             case (state)
                 IDLE: begin
                     if (i_valid && dec_valid_instr) begin
                         vd_reg         <= dec_vd;
+                        vs2_reg        <= dec_vs2;
                         base_addr_reg  <= i_base_addr;
                         stride_reg     <= i_stride;
                         is_mask_reg    <= dec_is_mask_op;
                         is_store_reg   <= dec_is_store;
                         is_strided_reg <= dec_is_strided_load || dec_is_strided_store;
+                        is_indexed_reg <= dec_is_indexed_load || dec_is_indexed_store;
+                        // captura los offsets de vs2 para indexed (puerto D del VRF)
+                        offset_buf     <= i_vrf_offset;
                         if (dec_is_store) begin
-                            // captura los 128 bits de vs3 desde el VRF (lectura combinacional)
+                            // captura los 128 bits de vs3 desde el VRF (puerto C)
                             asm_buf <= i_vrf_rdata;
                             state   <= SWRITE_0;
                         end else begin
@@ -262,14 +287,22 @@ module vlsu (
     // -------------------------------------------------------------------------
     // Logica combinacional: DCache
     // -------------------------------------------------------------------------
-    // step: 4 bytes fijos para unit-stride, stride_reg para constant-stride
+    // Generacion de direcciones segun modo:
+    //   unit-stride:  base + i*4
+    //   strided:      base + i*stride
+    //   indexed:      base + vs2[i]  (cada offset es un word de 32 bits en offset_buf)
     wire [31:0] step = is_strided_reg ? stride_reg : 32'd4;
 
+    wire [31:0] addr_0 = is_indexed_reg ? (base_addr_reg + offset_buf[31:0])   : base_addr_reg;
+    wire [31:0] addr_1 = is_indexed_reg ? (base_addr_reg + offset_buf[63:32])  : (base_addr_reg + step);
+    wire [31:0] addr_2 = is_indexed_reg ? (base_addr_reg + offset_buf[95:64])  : (base_addr_reg + (step*2));
+    wire [31:0] addr_3 = is_indexed_reg ? (base_addr_reg + offset_buf[127:96]) : (base_addr_reg + (step*3));
+
     assign o_mem_addr =
-        (state == ACCESS_0 || state == SWRITE_0) ? base_addr_reg             :
-        (state == ACCESS_1 || state == SWRITE_1) ? base_addr_reg + step      :
-        (state == ACCESS_2 || state == SWRITE_2) ? base_addr_reg + (step*2)  :
-        (state == ACCESS_3 || state == SWRITE_3) ? base_addr_reg + (step*3)  :
+        (state == ACCESS_0 || state == SWRITE_0) ? addr_0 :
+        (state == ACCESS_1 || state == SWRITE_1) ? addr_1 :
+        (state == ACCESS_2 || state == SWRITE_2) ? addr_2 :
+        (state == ACCESS_3 || state == SWRITE_3) ? addr_3 :
         32'b0;
 
     assign o_mem_read_en  = (state == ACCESS_0) || (state == ACCESS_1) ||
@@ -298,6 +331,10 @@ module vlsu (
     // o_vs3: presenta el indice de vs3 combinacionalmente en IDLE para que
     // i_vrf_rdata este listo antes del flanco que captura asm_buf
     assign o_vs3 = (state == IDLE) ? dec_vd : vd_reg;
+
+    // o_vs2: presenta el indice de vs2 combinacionalmente en IDLE para que
+    // i_vrf_offset este listo antes del flanco que captura offset_buf
+    assign o_vs2 = (state == IDLE) ? dec_vs2 : vs2_reg;
 
     // -------------------------------------------------------------------------
     // Logica combinacional: scoreboard

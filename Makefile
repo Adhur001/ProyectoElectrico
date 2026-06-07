@@ -6,7 +6,7 @@ RTL_ALU     = rtl/alu/alu.v rtl/alu/alu_array.v
 RTL_REG     = rtl/vregfile/vregisters.v
 RTL_PIPE    = rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/writeback.v
 RTL_TOP     = rtl/ve_top.v
-RTL_ALL     = $(RTL_ALU) $(RTL_REG) $(RTL_PIPE) $(RTL_TOP)
+RTL_ALL     = $(RTL_ALU) $(RTL_REG) $(RTL_PIPE) $(RTL_LSU) $(RTL_TOP)
 RTL_LSU     = rtl/LSU/vlsu.v
 
 .PHONY: all tb_alu tb_vregfile tb_ve_top tb_vlsu_decoder tb_vlsu_integration clean
@@ -39,4 +39,4 @@ tb_vlsu_integration:
 	@echo "Waveform: gtkwave tb_vlsu_integration.vcd"
 
 clean:
-	rm -f sim_alu sim_vregisters sim_ve_top sim_vlsu sim_vlsu_integration *.vcd
+	rm -f sim.* *.vcd

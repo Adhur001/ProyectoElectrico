@@ -11,7 +11,7 @@ RTL_LSU     = rtl/LSU/vlsu.v
 
 .PHONY: all tb_alu tb_vregfile tb_ve_top tb_vlsu_integration clean
 
-all: tb_alu tb_vregfile tb_ve_top tb_vlsu_decoder tb_vlsu_integration
+all: tb_alu tb_vregfile tb_ve_top tb_vlsu_integration
 
 tb_alu:
 	$(IVERILOG) $(FLAGS) -o sim_alu $(RTL_ALU) testbench/tb_alu.v

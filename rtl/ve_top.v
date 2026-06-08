@@ -4,6 +4,8 @@ module ve_top (
 
     input         i_valid,
     input  [31:0] i_instr,       // instruccion RVV de 32 bits
+    input         i_is_vx,       // indica instruccion vector-escalar
+    input  [31:0] i_scalar,      // valor escalar para operaciones VX
     input  [31:0] i_base_addr,   // direccion base para VLSU (simula rs1 escalar)
     input  [31:0] i_stride,      // stride para VLSU strided (simula rs2 escalar)
 
@@ -21,10 +23,12 @@ module ve_top (
     // =========================================================================
     wire        vlsu_busy;   // declarado aqui para uso en dispatch y scoreboard
 
-    wire [6:0] opcode      = i_instr[6:0];
-    wire [4:0] instr_rs1   = i_instr[19:15];
-    wire [4:0] instr_rs2   = i_instr[24:20];
-    wire [4:0] instr_rd    = i_instr[11:7];
+    wire [6:0] opcode       = i_instr[6:0];
+    wire [4:0] instr_rs1    = i_instr[19:15];
+    wire [4:0] instr_rs2    = i_instr[24:20];
+    wire [4:0] instr_rd     = i_instr[11:7];
+    wire [2:0] instr_funct3 = i_instr[14:12];
+    wire [6:0] instr_funct7 = i_instr[31:25];
 
     wire is_alu_op  = (opcode == 7'b1010111);
     wire is_vlsu_op = (opcode == 7'b0000111) || (opcode == 7'b0100111);
@@ -102,7 +106,7 @@ module ve_top (
     // Pipeline ALU: issue → execute → writeback
     // =========================================================================
     wire          s1_valid;
-    wire [2:0]    s1_alu_op;
+    wire [3:0]    s1_alu_op;
     wire [4:0]    s1_rd;
     wire [127:0]  s1_vs1_data, s1_vs2_data;
 
@@ -114,7 +118,13 @@ module ve_top (
         .clk        (clk),
         .rst        (rst),
         .i_valid    (alu_valid),
-        .i_instr    (i_instr),
+        .i_funct7   (instr_funct7),
+        .i_funct3   (instr_funct3),
+        .i_rs1      (instr_rs1),
+        .i_rs2      (instr_rs2),
+        .i_rd       (instr_rd),
+        .i_is_vx    (i_is_vx),
+        .i_scalar   (i_scalar),
         .i_vs1_data (data_a),
         .i_vs2_data (data_b),
         .o_addr_a   (addr_a),

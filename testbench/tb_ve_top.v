@@ -3,6 +3,8 @@ module tb_ve_top;
     reg        clk, rst;
     reg        i_valid;
     reg [31:0] i_instr;
+    reg        i_is_vx;
+    reg [31:0] i_scalar;
     reg [31:0] i_base_addr;
     reg [31:0] i_stride;
 
@@ -34,6 +36,8 @@ module tb_ve_top;
         .rst           (rst),
         .i_valid       (i_valid),
         .i_instr       (i_instr),
+        .i_is_vx       (i_is_vx),
+        .i_scalar      (i_scalar),
         .i_base_addr   (i_base_addr),
         .i_stride      (i_stride),
         .o_mem_addr    (o_mem_addr),
@@ -56,6 +60,8 @@ module tb_ve_top;
             @(posedge clk); #1;
             i_valid = 1;
             i_instr = instr;
+            i_is_vx = 0;
+            i_scalar = 0;
             @(posedge clk); #1;
             i_valid = 0;
             i_instr = 0;
@@ -83,7 +89,7 @@ module tb_ve_top;
         $dumpvars(0, tb_ve_top);
         $display("=== ve_top integration tests ===");
 
-        rst = 1; i_valid = 0; i_instr = 0;
+        rst = 1; i_valid = 0; i_instr = 0; i_is_vx = 0; i_scalar = 0;
         i_base_addr = 0; i_stride = 0;
         repeat(2) @(posedge clk); #1;
         rst = 0;
@@ -101,19 +107,19 @@ module tb_ve_top;
         send_alu(32'h002081D7);
         check_reg(5'd3, {4{32'h1E}});
 
-        // VSUB v4 = v2 - v1 : {10,...}  instr=32'h00111257
+        // VSUB v4 = v2 - v1 : {10,...}  funct7[5]=1,funct3=000,rs2=1,rs1=2,rd=4
         $display("Test: VSUB v4 = v2 - v1");
-        send_alu(32'h00111257);
+        send_alu(32'h40110257);
         check_reg(5'd4, {4{32'hA}});
 
-        // VAND v9 = v5 & v6  instr=32'h0062A4D7
+        // VAND v9 = v5 & v6  funct7=0,funct3=111,rs2=6,rs1=5,rd=9
         $display("Test: VAND v9 = v5 & v6");
-        send_alu(32'h0062A4D7);
+        send_alu(32'h0062F4D7);
         check_reg(5'd9, {4{32'h0F000F00}});
 
-        // VOR v10 = v7 | v8  instr=32'h0083B557
+        // VOR v10 = v7 | v8  funct7=0,funct3=110,rs2=8,rs1=7,rd=10
         $display("Test: VOR v10 = v7 | v8");
-        send_alu(32'h0083B557);
+        send_alu(32'h0083E557);
         check_reg(5'd10, {4{32'hFFFFFFFF}});
 
         // VXOR v11 = v7 ^ v8  instr=32'h0083C5D7

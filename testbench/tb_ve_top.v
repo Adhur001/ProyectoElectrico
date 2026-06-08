@@ -1,14 +1,14 @@
 `timescale 1ns/1ps
 module tb_ve_top;
     reg        clk, rst;
-    reg        i_valid;
-    reg [31:0] i_instr;
-    reg        i_is_vx;
-    reg [31:0] i_scalar;
-    reg [31:0] i_base_addr;
-    reg [31:0] i_stride;
 
-    // DCache simulada (la ve_top expone la interfaz externamente)
+    // Instruccion al decode unit
+    reg [31:0] du_i_instr;
+
+    // Registro entero simulado: el decode lee rs1/rs2 de aqui
+    reg [31:0] int_rf [0:31];
+
+    // DCache simulada
     wire [31:0] o_mem_addr;
     wire        o_mem_read_en;
     reg  [31:0] i_mem_rdata;
@@ -16,7 +16,6 @@ module tb_ve_top;
     wire [31:0] o_mem_wdata;
     wire [3:0]  o_mem_byte_en;
 
-    // Modelo de DCache combinacional
     reg [31:0] mem [0:127];
     always @(*) begin
         if (o_mem_read_en) i_mem_rdata = mem[o_mem_addr[6:0]];
@@ -31,15 +30,93 @@ module tb_ve_top;
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Decode unit (Modified_DecodeUnit.v)
+    // -------------------------------------------------------------------------
+    wire [4:0]  du_o_rs1_addr, du_o_rs2_addr;
+    wire [31:0] du_i_rs1_data, du_i_rs2_data;
+
+    assign du_i_rs1_data = int_rf[du_o_rs1_addr];
+    assign du_i_rs2_data = int_rf[du_o_rs2_addr];
+
+    wire        du_o_vec_valid;
+    wire [6:0]  du_o_vec_funct7;
+    wire [2:0]  du_o_vec_funct3;
+    wire [4:0]  du_o_vec_rs1, du_o_vec_rs2, du_o_vec_rd;
+    wire        du_o_vec_is_vx;
+    wire [31:0] du_o_vec_scalar;
+    wire        du_o_vec_lsu_valid;
+    wire        du_o_vec_is_load, du_o_vec_is_store;
+    wire        du_o_vec_is_mask_op, du_o_vec_is_strided, du_o_vec_is_indexed;
+    wire [31:0] du_o_vec_base_addr, du_o_vec_stride;
+
+    decode du (
+        .CLK            (clk),
+        .RST            (rst),
+        .FLUSH          (1'b0),
+        .STALL          (1'b0),
+        .i_instr        (du_i_instr),
+        .i_pc           (32'b0),
+        .i_bubble       (1'b0),
+        .i_rs1_data     (du_i_rs1_data),
+        .i_rs2_data     (du_i_rs2_data),
+        .o_rs1_addr     (du_o_rs1_addr),
+        .o_rs2_addr     (du_o_rs2_addr),
+        .o_vec_valid    (du_o_vec_valid),
+        .o_vec_funct7   (du_o_vec_funct7),
+        .o_vec_funct3   (du_o_vec_funct3),
+        .o_vec_rs1      (du_o_vec_rs1),
+        .o_vec_rs2      (du_o_vec_rs2),
+        .o_vec_rd       (du_o_vec_rd),
+        .o_vec_is_vx    (du_o_vec_is_vx),
+        .o_vec_scalar   (du_o_vec_scalar),
+        .o_vec_lsu_valid  (du_o_vec_lsu_valid),
+        .o_vec_is_load    (du_o_vec_is_load),
+        .o_vec_is_store   (du_o_vec_is_store),
+        .o_vec_is_mask_op (du_o_vec_is_mask_op),
+        .o_vec_is_strided (du_o_vec_is_strided),
+        .o_vec_is_indexed (du_o_vec_is_indexed),
+        .o_vec_base_addr  (du_o_vec_base_addr),
+        .o_vec_stride     (du_o_vec_stride),
+        // unused scalar pipeline outputs
+        .o_rs1_2_pc     (),
+        .o_is_branch    (),
+        .o_is_type_u    (),
+        .o_dual_op      (),
+        .o_pc           (),
+        .o_imm          (),
+        .o_is_unsigned  (),
+        .o_data_size    (),
+        .o_alu_op       (),
+        .o_alu_src_rs2  (),
+        .o_dmem_write   (),
+        .o_dmen_read    (),
+        .o_rd_addr      (),
+        .o_write_on_reg ()
+    );
+
+    // -------------------------------------------------------------------------
+    // ve_top DUT
+    // -------------------------------------------------------------------------
     ve_top dut (
-        .clk           (clk),
-        .rst           (rst),
-        .i_valid       (i_valid),
-        .i_instr       (i_instr),
-        .i_is_vx       (i_is_vx),
-        .i_scalar      (i_scalar),
-        .i_base_addr   (i_base_addr),
-        .i_stride      (i_stride),
+        .clk          (clk),
+        .rst          (rst),
+        .i_alu_valid  (du_o_vec_valid),
+        .i_funct7     (du_o_vec_funct7),
+        .i_funct3     (du_o_vec_funct3),
+        .i_rs1        (du_o_vec_rs1),
+        .i_rs2        (du_o_vec_rs2),
+        .i_rd         (du_o_vec_rd),
+        .i_is_vx      (du_o_vec_is_vx),
+        .i_scalar     (du_o_vec_scalar),
+        .i_lsu_valid  (du_o_vec_lsu_valid),
+        .i_is_load    (du_o_vec_is_load),
+        .i_is_store   (du_o_vec_is_store),
+        .i_is_mask_op (du_o_vec_is_mask_op),
+        .i_is_strided (du_o_vec_is_strided),
+        .i_is_indexed (du_o_vec_is_indexed),
+        .i_base_addr  (du_o_vec_base_addr),
+        .i_stride     (du_o_vec_stride),
         .o_mem_addr    (o_mem_addr),
         .o_mem_read_en (o_mem_read_en),
         .i_mem_rdata   (i_mem_rdata),
@@ -53,19 +130,18 @@ module tb_ve_top;
 
     integer pass = 0, fail = 0;
 
-    // Envia una instruccion ALU y espera que complete el pipeline (3 ciclos)
+    // Envia instruccion ALU a traves del decode unit y espera pipeline (3 ciclos)
+    // Latencia: 1 ciclo decode + 3 ciclos pipeline = 5 @posedge totales
     task send_alu;
         input [31:0] instr;
         begin
             @(posedge clk); #1;
-            i_valid = 1;
-            i_instr = instr;
-            i_is_vx = 0;
-            i_scalar = 0;
-            @(posedge clk); #1;
-            i_valid = 0;
-            i_instr = 0;
-            repeat(2) @(posedge clk); #1;
+            du_i_instr = instr;          // presentar instruccion al decode
+            @(posedge clk); #1;          // decode captura → o_vec_valid=1
+            du_i_instr = 32'h0000_0013; // NOP (ADDI x0,x0,0)
+            @(posedge clk); #1;          // issue captura
+            @(posedge clk); #1;          // execute captura
+            @(posedge clk); #1;          // VRF write
         end
     endtask
 
@@ -89,8 +165,7 @@ module tb_ve_top;
         $dumpvars(0, tb_ve_top);
         $display("=== ve_top integration tests ===");
 
-        rst = 1; i_valid = 0; i_instr = 0; i_is_vx = 0; i_scalar = 0;
-        i_base_addr = 0; i_stride = 0;
+        rst = 1; du_i_instr = 32'h0000_0013;
         repeat(2) @(posedge clk); #1;
         rst = 0;
 

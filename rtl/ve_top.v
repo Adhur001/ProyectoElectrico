@@ -2,12 +2,25 @@ module ve_top (
     input         clk,
     input         rst,
 
-    input         i_valid,
-    input  [31:0] i_instr,       // instruccion RVV de 32 bits
-    input         i_is_vx,       // indica instruccion vector-escalar
-    input  [31:0] i_scalar,      // valor escalar para operaciones VX
-    input  [31:0] i_base_addr,   // direccion base para VLSU (simula rs1 escalar)
-    input  [31:0] i_stride,      // stride para VLSU strided (simula rs2 escalar)
+    // Pre-decoded ALU path — de Modified_DecodeUnit (o_vec_*)
+    input         i_alu_valid,    // o_vec_valid
+    input  [6:0]  i_funct7,       // o_vec_funct7
+    input  [2:0]  i_funct3,       // o_vec_funct3
+    input  [4:0]  i_rs1,          // o_vec_rs1
+    input  [4:0]  i_rs2,          // o_vec_rs2
+    input  [4:0]  i_rd,           // o_vec_rd
+    input         i_is_vx,        // o_vec_is_vx
+    input  [31:0] i_scalar,       // o_vec_scalar
+
+    // Pre-decoded VLSU path — de Modified_DecodeUnit (o_vec_lsu_* / o_vec_*)
+    input         i_lsu_valid,    // o_vec_lsu_valid
+    input         i_is_load,      // o_vec_is_load
+    input         i_is_store,     // o_vec_is_store
+    input         i_is_mask_op,   // o_vec_is_mask_op
+    input         i_is_strided,   // o_vec_is_strided
+    input         i_is_indexed,   // o_vec_is_indexed
+    input  [31:0] i_base_addr,    // o_vec_base_addr (valor de rs1 del RF escalar)
+    input  [31:0] i_stride,       // o_vec_stride    (valor de rs2 del RF escalar)
 
     // Interfaz con DCache (externa)
     output [31:0] o_mem_addr,
@@ -19,24 +32,11 @@ module ve_top (
 );
 
     // =========================================================================
-    // Decodificacion de opcode y dispatch
-    // =========================================================================
-    wire        vlsu_busy;   // declarado aqui para uso en dispatch y scoreboard
-
-    wire [6:0] opcode       = i_instr[6:0];
-    wire [4:0] instr_rs1    = i_instr[19:15];
-    wire [4:0] instr_rs2    = i_instr[24:20];
-    wire [4:0] instr_rd     = i_instr[11:7];
-    wire [2:0] instr_funct3 = i_instr[14:12];
-    wire [6:0] instr_funct7 = i_instr[31:25];
-
-    wire is_alu_op  = (opcode == 7'b1010111);
-    wire is_vlsu_op = (opcode == 7'b0000111) || (opcode == 7'b0100111);
-
-    // =========================================================================
     // Scoreboard: 1 bit por registro vectorial
     // Solo las cargas marcan registros como busy (stores no escriben al VRF)
     // =========================================================================
+    wire        vlsu_busy;
+
     reg [31:0] scoreboard;
 
     wire        vlsu_scoreboard_set;
@@ -52,23 +52,22 @@ module ve_top (
         end
     end
 
-    // Hazard: alguno de los registros involucrados en la instruccion ALU
-    // esta siendo escrito por el VLSU
-    wire alu_hazard = scoreboard[instr_rs1] | scoreboard[instr_rs2] | scoreboard[instr_rd];
+    // Hazard: alguno de los registros de la instruccion ALU esta ocupado por el VLSU
+    wire alu_hazard = scoreboard[i_rs1] | scoreboard[i_rs2] | scoreboard[i_rd];
 
-    wire alu_valid  = i_valid && is_alu_op  && !alu_hazard;
-    wire vlsu_valid = i_valid && is_vlsu_op && !vlsu_busy;
+    wire alu_valid  = i_alu_valid && !alu_hazard;
+    wire vlsu_valid = i_lsu_valid && !vlsu_busy;
 
     // =========================================================================
-    // Banco de registros vectoriales (3 puertos de lectura)
-    // Puerto A: issue stage rs1
-    // Puerto B: issue stage rs2
+    // Banco de registros vectoriales (4 puertos de lectura)
+    // Puerto A: issue stage vs1
+    // Puerto B: issue stage vs2
     // Puerto C: VLSU vs3 (stores)
+    // Puerto D: VLSU vs2 (indexed offsets)
     // =========================================================================
     wire [4:0]   addr_a, addr_b;
     wire [127:0] data_a, data_b, data_c;
 
-    // Puerto de escritura: mux entre VLSU (cargas) y ALU writeback
     wire        vlsu_vrf_we;
     wire [4:0]  vlsu_vrf_addr;
     wire [127:0] vlsu_vrf_data;
@@ -118,11 +117,11 @@ module ve_top (
         .clk        (clk),
         .rst        (rst),
         .i_valid    (alu_valid),
-        .i_funct7   (instr_funct7),
-        .i_funct3   (instr_funct3),
-        .i_rs1      (instr_rs1),
-        .i_rs2      (instr_rs2),
-        .i_rd       (instr_rd),
+        .i_funct7   (i_funct7),
+        .i_funct3   (i_funct3),
+        .i_rs1      (i_rs1),
+        .i_rs2      (i_rs2),
+        .i_rd       (i_rd),
         .i_is_vx    (i_is_vx),
         .i_scalar   (i_scalar),
         .i_vs1_data (data_a),
@@ -166,7 +165,13 @@ module ve_top (
         .clk              (clk),
         .rst              (rst),
         .i_valid          (vlsu_valid),
-        .i_instr          (i_instr),
+        .i_vd             (i_rd),           // vd/vs3 = rd field del decode
+        .i_vs2            (i_rs2),          // vs2 = rs2 field del decode
+        .i_is_load        (i_is_load),
+        .i_is_store       (i_is_store),
+        .i_is_mask_op     (i_is_mask_op),
+        .i_is_strided     (i_is_strided),
+        .i_is_indexed     (i_is_indexed),
         .i_base_addr      (i_base_addr),
         .i_stride         (i_stride),
         .o_mem_addr       (o_mem_addr),

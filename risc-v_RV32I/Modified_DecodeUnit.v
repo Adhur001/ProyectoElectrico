@@ -40,8 +40,10 @@ module decode #(
    input wire [XLEN-1:0] i_pc,               // PC of instructions fetched from ICach
    input wire            i_bubble,           // NOP required after Fetch flushed (br/jmp taken)
 
-   // [VEC] Value of integer RS2, read combinationally from the integer RF.
-   //       Captured into o_vec_scalar on the clock edge for VALU-VX instructions.
+   // [VEC] Values of integer RS1 and RS2, read combinationally from the integer RF.
+   //       RS2 captured as o_vec_scalar for VALU-VX instructions.
+   //       RS1 captured as o_vec_base_addr and RS2 as o_vec_stride for VLSU instructions.
+   input wire [31:0]     i_rs1_data,         // RS1 value from integer register file
    input wire [31:0]     i_rs2_data,         // RS2 value from integer register file
 
    // ------------ OUPUTS ------------
@@ -75,15 +77,25 @@ module decode #(
    output reg [4:0]  o_rd_addr,              // Address of destiny register to update
    output reg        o_write_on_reg,         // Write enable flag for RF
 
-   // [VEC] Sequential to vector extension unit (ve_top)
-   output reg        o_vec_valid,            // 1 during the cycle a vector instruction is decoded
+   // [VEC] Sequential to vector extension unit (ve_top) — ALU path
+   output reg        o_vec_valid,            // 1 when a vector ALU instruction is decoded (VV or VX)
    output reg [6:0]  o_vec_funct7,           // funct7 field forwarded to ve_top
    output reg [2:0]  o_vec_funct3,           // funct3 field forwarded to ve_top
    output reg [4:0]  o_vec_rs1,             // Source vector register 1 address
    output reg [4:0]  o_vec_rs2,             // Source vector register 2 address (used by VV only)
    output reg [4:0]  o_vec_rd,              // Destination vector register address
    output reg        o_vec_is_vx,           // 1 = VALU-VX (scalar operand), 0 = VALU-VV
-   output reg [31:0] o_vec_scalar            // Scalar operand captured from integer RF (VX only)
+   output reg [31:0] o_vec_scalar,           // Scalar operand captured from integer RF (VX only)
+
+   // [VEC] Sequential to vector extension unit (ve_top) — VLSU path
+   output reg        o_vec_lsu_valid,        // 1 when a vector load/store instruction is decoded
+   output reg        o_vec_is_load,          // opcode == 0000111
+   output reg        o_vec_is_store,         // opcode == 0100111
+   output reg        o_vec_is_mask_op,       // unit-stride mask variant (lumop == 01011)
+   output reg        o_vec_is_strided,       // constant-stride (mop == 10)
+   output reg        o_vec_is_indexed,       // indexed-unordered (mop == 01)
+   output reg [31:0] o_vec_base_addr,        // RS1 value from integer RF (base address for VLSU)
+   output reg [31:0] o_vec_stride            // RS2 value from integer RF (stride for VLSU strided)
 );
 
 //===============================================================================================================
@@ -107,6 +119,8 @@ localparam OPCODE_SPECIAL_2 = 7'b1110011;      // ecall, ebreak (2)
 // OPCODE_VALU_VX uses the custom-0 opcode reserved by RISC-V for non-standard extensions.
 localparam OPCODE_VALU_VV   = 7'b1010111;      // Vector-Vector  ALU — both operands from vector RF
 localparam OPCODE_VALU_VX   = 7'b0001011;      // Vector-Scalar  ALU — operand B from integer RF
+localparam OPCODE_VLSU_ST   = 7'b0100111;      // Vector store opcode
+localparam OPCODE_VLSU_LD   = 7'b0000111;      // Vector load opcode
 
 // Logical and arithmetic ID for ALU opcode
 localparam ADD  = 4'b0000;
@@ -249,6 +263,14 @@ assign is_typeSP2      = (opcode == OPCODE_SPECIAL_2);
 // [VEC] Vector instruction type flags
 assign is_valu_vv      = (opcode == OPCODE_VALU_VV);   // vector-vector ALU
 assign is_valu_vx      = (opcode == OPCODE_VALU_VX);   // vector-scalar ALU
+assign is_vlsu_ld      = (opcode == OPCODE_VLSU_LD);   // vector load
+assign is_vlsu_st      = (opcode == OPCODE_VLSU_ST);   // vector store
+
+// [VEC] VLSU addressing sub-fields (shared bit positions with rs2/funct7)
+wire [1:0] mop;
+wire [4:0] lumop;
+assign mop   = i_instr[27:26];   // addressing mode: 00=unit-stride, 01=indexed, 10=strided
+assign lumop = i_instr[24:20];   // lumop/sumop (same bits as rs2, valid when mop==00)
 
 
 /*
@@ -318,14 +340,22 @@ always @(posedge CLK) begin
       o_rd_addr       <= 0;
       o_write_on_reg  <= 0;
       // [VEC] Clear vector outputs on reset / flush / bubble
-      o_vec_valid     <= 0;
-      o_vec_funct7    <= 0;
-      o_vec_funct3    <= 0;
-      o_vec_rs1       <= 0;
-      o_vec_rs2       <= 0;
-      o_vec_rd        <= 0;
-      o_vec_is_vx     <= 0;
-      o_vec_scalar    <= 0;
+      o_vec_valid      <= 0;
+      o_vec_funct7     <= 0;
+      o_vec_funct3     <= 0;
+      o_vec_rs1        <= 0;
+      o_vec_rs2        <= 0;
+      o_vec_rd         <= 0;
+      o_vec_is_vx      <= 0;
+      o_vec_scalar     <= 0;
+      o_vec_lsu_valid  <= 0;
+      o_vec_is_load    <= 0;
+      o_vec_is_store   <= 0;
+      o_vec_is_mask_op <= 0;
+      o_vec_is_strided <= 0;
+      o_vec_is_indexed <= 0;
+      o_vec_base_addr  <= 0;
+      o_vec_stride     <= 0;
 
    end else if (STALL) begin
       o_rs1_2_pc      <= o_rs1_2_pc;
@@ -343,14 +373,22 @@ always @(posedge CLK) begin
       o_rd_addr       <= o_rd_addr;
       o_write_on_reg  <= o_write_on_reg;
       // [VEC] Freeze vector outputs on stall
-      o_vec_valid     <= o_vec_valid;
-      o_vec_funct7    <= o_vec_funct7;
-      o_vec_funct3    <= o_vec_funct3;
-      o_vec_rs1       <= o_vec_rs1;
-      o_vec_rs2       <= o_vec_rs2;
-      o_vec_rd        <= o_vec_rd;
-      o_vec_is_vx     <= o_vec_is_vx;
-      o_vec_scalar    <= o_vec_scalar;
+      o_vec_valid      <= o_vec_valid;
+      o_vec_funct7     <= o_vec_funct7;
+      o_vec_funct3     <= o_vec_funct3;
+      o_vec_rs1        <= o_vec_rs1;
+      o_vec_rs2        <= o_vec_rs2;
+      o_vec_rd         <= o_vec_rd;
+      o_vec_is_vx      <= o_vec_is_vx;
+      o_vec_scalar     <= o_vec_scalar;
+      o_vec_lsu_valid  <= o_vec_lsu_valid;
+      o_vec_is_load    <= o_vec_is_load;
+      o_vec_is_store   <= o_vec_is_store;
+      o_vec_is_mask_op <= o_vec_is_mask_op;
+      o_vec_is_strided <= o_vec_is_strided;
+      o_vec_is_indexed <= o_vec_is_indexed;
+      o_vec_base_addr  <= o_vec_base_addr;
+      o_vec_stride     <= o_vec_stride;
 
    end else begin
 
@@ -373,8 +411,8 @@ always @(posedge CLK) begin
       end
 
       // [VEC] Default: no vector instruction active this cycle
-      o_vec_valid <= 1'b0;
-
+      o_vec_valid     <= 1'b0;
+      o_vec_lsu_valid <= 1'b0;
 
       // For each instruction
       if (is_typeR) begin
@@ -542,6 +580,32 @@ always @(posedge CLK) begin
          o_vec_is_vx     <= 1;
          o_vec_scalar    <= i_rs2_data;   // scalar captured from integer RF at rs2 address
 
+      // [VEC] Vector load/store instruction (opcodes 0000111 / 0100111)
+      // Dispatch to VLSU. Register fields share bit positions with R-type:
+      //   vd/vs3 = rd = i_instr[11:7], rs1 (base) = i_instr[19:15], rs2/vs2 = i_instr[24:20]
+      // o_write_on_reg=0: result goes to vector RF, not integer RF.
+      end else if (is_vlsu_ld || is_vlsu_st) begin
+         o_rs1_2_pc      <= 0;
+         o_is_branch     <= 0;
+         o_is_type_u     <= 0;
+         o_dual_op       <= 0;
+         o_is_unsigned   <= 0;
+         o_alu_src_rs2   <= 0;
+         o_dmem_write    <= 0;
+         o_dmen_read     <= 0;
+         o_write_on_reg  <= 0;
+         o_vec_lsu_valid  <= 1;
+         o_vec_is_load    <= is_vlsu_ld;
+         o_vec_is_store   <= is_vlsu_st;
+         o_vec_rs1        <= rs1;
+         o_vec_rs2        <= rs2;
+         o_vec_rd         <= rd;
+         o_vec_is_mask_op <= (mop == 2'b00) && (lumop == 5'b01011);
+         o_vec_is_strided <= (mop == 2'b10);
+         o_vec_is_indexed <= (mop == 2'b01);
+         o_vec_base_addr  <= i_rs1_data;   // base address captured from integer RF
+         o_vec_stride     <= i_rs2_data;   // stride captured from integer RF (strided mode)
+
       end
    end
 end
@@ -570,6 +634,13 @@ always @(*) begin
       //       that will be captured as o_vec_scalar on the next clock edge.
       //       VV instructions do not read from the integer RF.
       if (is_valu_vx) begin
+         o_rs2_addr    <= rs2;
+      end
+
+      // [VEC] For VLSU instructions, rs1 (base address) and rs2 (stride) must be driven so the
+      //       integer RF outputs both values, captured as o_vec_base_addr and o_vec_stride.
+      if (is_vlsu_ld || is_vlsu_st) begin
+         o_rs1_addr    <= rs1;
          o_rs2_addr    <= rs2;
       end
    end

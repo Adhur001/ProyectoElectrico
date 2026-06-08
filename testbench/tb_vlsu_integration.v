@@ -1,5 +1,6 @@
-// Testbench de integracion: VLSU + banco de registros vectoriales + DCache
-// Verifica el flujo completo de cargas y stores vectoriales
+// Testbench de integracion: DecodeUnit + VLSU + banco de registros vectoriales + DCache
+// Verifica el flujo completo: instruccion → decode → VLSU → memoria/VRF
+// Todas las instrucciones usan x1 (int_rf[1]) para base_addr y x2 (int_rf[2]) para stride.
 
 `timescale 1ns/1ps
 
@@ -13,13 +14,72 @@ module tb_vlsu_integration;
     always #5 clk = ~clk;
 
     // -------------------------------------------------------------------------
+    // Registro entero simulado — el decode lee base_addr (rs1) y stride (rs2) de aqui
+    // -------------------------------------------------------------------------
+    reg [31:0] int_rf [0:31];
+
+    // Instruccion al decode unit
+    reg [31:0] du_i_instr;
+
+    // -------------------------------------------------------------------------
+    // Decode unit (Modified_DecodeUnit.v)
+    // -------------------------------------------------------------------------
+    wire [4:0]  du_o_rs1_addr, du_o_rs2_addr;
+
+    wire        du_o_vec_lsu_valid;
+    wire        du_o_vec_is_load, du_o_vec_is_store;
+    wire        du_o_vec_is_mask_op, du_o_vec_is_strided, du_o_vec_is_indexed;
+    wire [4:0]  du_o_vec_rd, du_o_vec_rs2;
+    wire [31:0] du_o_vec_base_addr, du_o_vec_stride;
+
+    decode du (
+        .CLK            (clk),
+        .RST            (rst),
+        .FLUSH          (1'b0),
+        .STALL          (1'b0),
+        .i_instr        (du_i_instr),
+        .i_pc           (32'b0),
+        .i_bubble       (1'b0),
+        .i_rs1_data     (int_rf[du_o_rs1_addr]),
+        .i_rs2_data     (int_rf[du_o_rs2_addr]),
+        .o_rs1_addr     (du_o_rs1_addr),
+        .o_rs2_addr     (du_o_rs2_addr),
+        .o_vec_lsu_valid  (du_o_vec_lsu_valid),
+        .o_vec_is_load    (du_o_vec_is_load),
+        .o_vec_is_store   (du_o_vec_is_store),
+        .o_vec_is_mask_op (du_o_vec_is_mask_op),
+        .o_vec_is_strided (du_o_vec_is_strided),
+        .o_vec_is_indexed (du_o_vec_is_indexed),
+        .o_vec_rd         (du_o_vec_rd),
+        .o_vec_rs2        (du_o_vec_rs2),
+        .o_vec_base_addr  (du_o_vec_base_addr),
+        .o_vec_stride     (du_o_vec_stride),
+        // outputs no conectados en este banco de pruebas
+        .o_rs1_2_pc     (),
+        .o_is_branch    (),
+        .o_is_type_u    (),
+        .o_dual_op      (),
+        .o_pc           (),
+        .o_imm          (),
+        .o_is_unsigned  (),
+        .o_data_size    (),
+        .o_alu_op       (),
+        .o_alu_src_rs2  (),
+        .o_dmem_write   (),
+        .o_dmen_read    (),
+        .o_rd_addr      (),
+        .o_write_on_reg (),
+        .o_vec_valid    (),
+        .o_vec_funct7   (),
+        .o_vec_funct3   (),
+        .o_vec_rs1      (),
+        .o_vec_is_vx    (),
+        .o_vec_scalar   ()
+    );
+
+    // -------------------------------------------------------------------------
     // Señales del VLSU
     // -------------------------------------------------------------------------
-    reg         i_valid;
-    reg  [31:0] i_instr;
-    reg  [31:0] i_base_addr;
-    reg  [31:0] i_stride;
-
     wire [31:0]  o_mem_addr;
     wire         o_mem_read_en;
     reg  [31:0]  i_mem_rdata;
@@ -62,15 +122,21 @@ module tb_vlsu_integration;
     end
 
     // -------------------------------------------------------------------------
-    // Instancia del VLSU
+    // Instancia del VLSU — recibe campos ya decodificados del decode unit
     // -------------------------------------------------------------------------
     vlsu lsu (
         .clk              (clk),
         .rst              (rst),
-        .i_valid          (i_valid),
-        .i_instr          (i_instr),
-        .i_base_addr      (i_base_addr),
-        .i_stride         (i_stride),
+        .i_valid          (du_o_vec_lsu_valid),
+        .i_vd             (du_o_vec_rd),         // rd = vd/vs3
+        .i_vs2            (du_o_vec_rs2),        // rs2 = vs2 (indexed offsets)
+        .i_is_load        (du_o_vec_is_load),
+        .i_is_store       (du_o_vec_is_store),
+        .i_is_mask_op     (du_o_vec_is_mask_op),
+        .i_is_strided     (du_o_vec_is_strided),
+        .i_is_indexed     (du_o_vec_is_indexed),
+        .i_base_addr      (du_o_vec_base_addr),
+        .i_stride         (du_o_vec_stride),
         .o_mem_addr       (o_mem_addr),
         .o_mem_read_en    (o_mem_read_en),
         .i_mem_rdata      (i_mem_rdata),
@@ -92,9 +158,6 @@ module tb_vlsu_integration;
 
     // -------------------------------------------------------------------------
     // Banco de registros vectoriales
-    // Puerto de escritura: conectado al VLSU (cargas)
-    // Puerto de lectura A: conectado al VLSU (stores, via o_vs3)
-    // Puerto de lectura B: disponible para verificacion
     // -------------------------------------------------------------------------
     reg  [4:0]   read_addr;
     wire [127:0] read_data;
@@ -107,12 +170,12 @@ module tb_vlsu_integration;
         .data_in (o_vrf_data),
         .addr_a  (o_vs3),        // VLSU: lectura de vs3 (stores)
         .addr_b  (read_addr),    // puerto libre para verificacion
-        .addr_c  (5'b0),         // no usado en este testbench
+        .addr_c  (5'b0),
         .addr_d  (o_vs2),        // VLSU: lectura de vs2 (indexed offsets)
-        .data_a  (i_vrf_rdata),  // dato de vs3 → VLSU
+        .data_a  (i_vrf_rdata),
         .data_b  (read_data),
         .data_c  (),
-        .data_d  (i_vrf_offset)  // offsets de vs2 → VLSU
+        .data_d  (i_vrf_offset)
     );
 
     // -------------------------------------------------------------------------
@@ -134,6 +197,11 @@ module tb_vlsu_integration;
 
     // -------------------------------------------------------------------------
     // Secuencia de pruebas
+    // Latencia decode: 1 ciclo extra vs el testbench anterior.
+    //   Cargas:  7 @posedge (1 decode + 1 IDLE→ACCESS_0 + 4 ACCESS + 1 WRITEBACK)
+    //   Stores:  6 @posedge (1 decode + 1 IDLE→SWRITE_0 + 4 SWRITE)
+    // int_rf[1] = base_addr (rs1=x1 en todas las instrucciones)
+    // int_rf[2] = stride    (rs2=x2 en instrucciones strided)
     // -------------------------------------------------------------------------
     initial begin
         $dumpfile("tb_vlsu_integration.vcd");
@@ -150,52 +218,48 @@ module tb_vlsu_integration;
         mem[28] = 32'h0000_0003;
         mem[32] = 32'h0000_0004;
 
-        // Test 5 (VLSE32 strided, base=100, stride=4)
         mem[100] = 32'hA1A1_A1A1;
         mem[104] = 32'hB2B2_B2B2;
         mem[108] = 32'hC3C3_C3C3;
         mem[112] = 32'hD4D4_D4D4;
 
-        i_valid = 0; i_instr = 0; i_base_addr = 0; i_stride = 0; read_addr = 0;
+        du_i_instr = 32'h0000_0013; read_addr = 0;
         rst = 1;
         @(posedge clk); @(posedge clk);
         #1; rst = 0;
         @(posedge clk); #1;
 
         // =================================================================
-        // TEST 1: VLE32.v v3, (x0)  base=0 → vregisters[3]
-        //   Instruccion: 32'h0200_6187
+        // TEST 1: VLE32.v v3, (x1)  base=0 → vregisters[3]
+        //   Instruccion: 32'h0200_E187  (rs1=x1, mop=00, vd=v3, width=110)
         //   Esperado: {0x9ABCDEF0, 0x12345678, 0xCAFEBABE, 0xDEADBEEF}
         // =================================================================
-        $display("\n[TEST 1] VLE32.v v3, (x0)  base=0 → vregisters[3]");
-
-        i_instr     = 32'h0200_6187;
-        i_base_addr = 32'd0;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
-        @(posedge clk); #1;
-        @(posedge clk); #1;
-        @(posedge clk); #1;
-        @(posedge clk); #1;
-        @(posedge clk); #1; // WRITEBACK → IDLE
+        $display("\n[TEST 1] VLE32.v v3, (x1)  base=0 → vregisters[3]");
+        int_rf[1] = 32'd0;
+        du_i_instr = 32'h0200_E187;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013; // decode captura
+        @(posedge clk); #1;  // IDLE→ACCESS_0
+        @(posedge clk); #1;  // ACCESS_0→ACCESS_1
+        @(posedge clk); #1;  // ACCESS_1→ACCESS_2
+        @(posedge clk); #1;  // ACCESS_2→ACCESS_3
+        @(posedge clk); #1;  // ACCESS_3→WRITEBACK
+        @(posedge clk); #1;  // WRITEBACK→IDLE, VRF escribe
 
         read_addr = 5'd3; #1;
         $display("  vregisters[3] tras carga:");
-        $display("    vrf[3][127:0]:  ");
         check(read_data, {32'h9ABC_DEF0, 32'h1234_5678, 32'hCAFE_BABE, 32'hDEAD_BEEF});
 
         // =================================================================
-        // TEST 2: VLE32.v v5, (x0)  base=20 → vregisters[5]
-        //   Instruccion: 32'h0200_6287
+        // TEST 2: VLE32.v v5, (x1)  base=20 → vregisters[5]
+        //   Instruccion: 32'h0200_E287  (rs1=x1, vd=v5)
         //   Esperado: {0x00000004, 0x00000003, 0x00000002, 0x00000001}
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 2] VLE32.v v5, (x0)  base=20 → vregisters[5]");
-
-        i_instr     = 32'h0200_6287;
-        i_base_addr = 32'd20;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 2] VLE32.v v5, (x1)  base=20 → vregisters[5]");
+        int_rf[1] = 32'd20;
+        du_i_instr = 32'h0200_E287;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -204,25 +268,23 @@ module tb_vlsu_integration;
 
         read_addr = 5'd5; #1;
         $display("  vregisters[5] tras carga:");
-        $display("    vrf[5][127:0]:  ");
         check(read_data, {32'h0000_0004, 32'h0000_0003, 32'h0000_0002, 32'h0000_0001});
 
         // =================================================================
-        // TEST 3: VSE32.v v3, (x0)  base=40
-        //   Instruccion: 32'h0200_61A7
-        //   Escribe vregisters[3] = {0x9ABCDEF0,...,0xDEADBEEF} en mem[40..52]
+        // TEST 3: VSE32.v v3, (x1)  base=40
+        //   Instruccion: 32'h0200_E1A7  (rs1=x1, vs3=v3, mop=00)
+        //   Escribe vregisters[3] en mem[40..52]
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 3] VSE32.v v3, (x0)  base=40 → DCache[40..52]");
-
-        i_instr     = 32'h0200_61A7;
-        i_base_addr = 32'd40;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
-        @(posedge clk); #1;
-        @(posedge clk); #1;
-        @(posedge clk); #1;
-        @(posedge clk); #1; // SWRITE_3 → IDLE
+        $display("\n[TEST 3] VSE32.v v3, (x1)  base=40 → DCache[40..52]");
+        int_rf[1] = 32'd40;
+        du_i_instr = 32'h0200_E1A7;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;  // IDLE→SWRITE_0, captura vs3
+        @(posedge clk); #1;  // SWRITE_0→SWRITE_1, mem[40] escrito
+        @(posedge clk); #1;  // SWRITE_1→SWRITE_2, mem[44] escrito
+        @(posedge clk); #1;  // SWRITE_2→SWRITE_3, mem[48] escrito
+        @(posedge clk); #1;  // SWRITE_3→IDLE,     mem[52] escrito
 
         #1;
         $display("  DCache tras store de v3:");
@@ -232,17 +294,16 @@ module tb_vlsu_integration;
         $display("    mem[52]:  "); check(mem[52],  32'h9ABC_DEF0);
 
         // =================================================================
-        // TEST 4: VSE32.v v5, (x0)  base=60
-        //   Instruccion: 32'h0200_62A7
-        //   Escribe vregisters[5] = {0x4, 0x3, 0x2, 0x1} en mem[60..72]
+        // TEST 4: VSE32.v v5, (x1)  base=60
+        //   Instruccion: 32'h0200_E2A7  (rs1=x1, vs3=v5)
+        //   Escribe vregisters[5] en mem[60..72]
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 4] VSE32.v v5, (x0)  base=60 → DCache[60..72]");
-
-        i_instr     = 32'h0200_62A7;
-        i_base_addr = 32'd60;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 4] VSE32.v v5, (x1)  base=60 → DCache[60..72]");
+        int_rf[1] = 32'd60;
+        du_i_instr = 32'h0200_E2A7;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -256,21 +317,19 @@ module tb_vlsu_integration;
         $display("    mem[72]:  "); check(mem[72],  32'h0000_0004);
 
         // =================================================================
-        // TEST 5: VLSE32.v v7, (x0), stride=4  base=100
+        // TEST 5: VLSE32.v v7, (x1), x2  base=100, stride=4
+        //   Instruccion: 32'h0A02_E387  (rs1=x1, rs2=x2, mop=10, vd=v7)
         //   Accede: mem[100], mem[104], mem[108], mem[112]
         //   Esperado en vregisters[7]:
         //   {0xD4D4D4D4, 0xC3C3C3C3, 0xB2B2B2B2, 0xA1A1A1A1}
-        //   Instruccion: VLSE32.v v7,(x0),x0  mop=10 vd=7 rs1=0 rs2=0
-        //   Hex: 32'h0A00_6387
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 5] VLSE32.v v7, (x0), stride=4  base=100 → vregisters[7]");
-
-        i_instr     = 32'h0A00_6387;  // VLSE32.v v7, (x0), x0
-        i_base_addr = 32'd100;
-        i_stride    = 32'd4;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 5] VLSE32.v v7, (x1), x2  base=100, stride=4 → vregisters[7]");
+        int_rf[1] = 32'd100;
+        int_rf[2] = 32'd4;
+        du_i_instr = 32'h0A20_E387;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -279,23 +338,20 @@ module tb_vlsu_integration;
 
         read_addr = 5'd7; #1;
         $display("  vregisters[7] tras carga strided:");
-        $display("    vrf[7][127:0]:  ");
         check(read_data, {32'hD4D4_D4D4, 32'hC3C3_C3C3, 32'hB2B2_B2B2, 32'hA1A1_A1A1});
 
         // =================================================================
-        // TEST 6: VSSE32.v v3, (x0), stride=8  base=80
-        //   Instruccion: 32'h0A00_61A7 — VSSE32.v v3,(x0),x0
+        // TEST 6: VSSE32.v v3, (x1), x2  base=80, stride=8
+        //   Instruccion: 32'h0A02_E1A7  (rs1=x1, rs2=x2, mop=10, vs3=v3)
         //   Escribe vregisters[3] en mem[80], mem[88], mem[96], mem[104]
-        //   vregisters[3] = {0x9ABCDEF0, 0x12345678, 0xCAFEBABE, 0xDEADBEEF}
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 6] VSSE32.v v3, (x0), stride=8  base=80 → DCache[80,88,96,104]");
-
-        i_instr     = 32'h0A00_61A7;  // VSSE32.v v3, (x0), x0
-        i_base_addr = 32'd80;
-        i_stride    = 32'd8;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 6] VSSE32.v v3, (x1), x2  base=80, stride=8 → DCache[80,88,96,104]");
+        int_rf[1] = 32'd80;
+        int_rf[2] = 32'd8;
+        du_i_instr = 32'h0A20_E1A7;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -308,25 +364,23 @@ module tb_vlsu_integration;
         $display("    mem[96]:   "); check(mem[96],  32'h1234_5678);
         $display("    mem[104]:  "); check(mem[104], 32'h9ABC_DEF0);
 
-        // Re-inicializa mem[112] para indexed (test 5 lo tenia en D4D4D4D4)
-        // Esta asignacion ocurre en tiempo de simulacion, despues de que test 5 ya leyo mem[112]
+        // Pre-inicializar memoria para test de offsets (indexed)
         mem[112] = 32'd0;
         mem[116] = 32'd8;
         mem[120] = 32'd4;
         mem[124] = 32'd12;
 
         // =================================================================
-        // TEST 7: VLE32.v v2, (x0)  base=112  — carga offsets en v2
-        //   v2 = {12, 4, 8, 0}   (offsets para accesos desordenados)
-        //   Instruccion: 32'h02006107
+        // TEST 7: VLE32.v v2, (x1)  base=112  — carga offsets en v2
+        //   Instruccion: 32'h0200_E107  (rs1=x1, vd=v2)
+        //   v2 = {12, 4, 8, 0}
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 7] VLE32.v v2, (x0)  base=112 → v2={12,4,8,0} (prep indexed)");
-
-        i_instr     = 32'h02006107;
-        i_base_addr = 32'd112;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 7] VLE32.v v2, (x1)  base=112 → v2={12,4,8,0} (prep indexed)");
+        int_rf[1] = 32'd112;
+        du_i_instr = 32'h0200_E107;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -338,19 +392,18 @@ module tb_vlsu_integration;
         check(read_data, {32'd12, 32'd4, 32'd8, 32'd0});
 
         // =================================================================
-        // TEST 8: vluxei32.v v9, (x0), v2  base=20
+        // TEST 8: vluxei32.v v9, (x1), v2  base=20
+        //   Instruccion: 32'h0620_E487  (rs1=x1, vs2=v2, mop=01, vd=v9)
         //   offsets en v2: {0, 8, 4, 12}
         //   accede: mem[20+0]=1, mem[20+8]=3, mem[20+4]=2, mem[20+12]=4
         //   esperado v9 = {4, 2, 3, 1}
-        //   Instruccion: 32'h06206487
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 8] vluxei32.v v9, (x0), v2  base=20 → v9={4,2,3,1}");
-
-        i_instr     = 32'h06206487;
-        i_base_addr = 32'd20;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 8] vluxei32.v v9, (x1), v2  base=20 → v9={4,2,3,1}");
+        int_rf[1] = 32'd20;
+        du_i_instr = 32'h0620_E487;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
@@ -362,18 +415,17 @@ module tb_vlsu_integration;
         check(read_data, {32'd4, 32'd2, 32'd3, 32'd1});
 
         // =================================================================
-        // TEST 9: vsuxei32.v v9, (x0), v2  base=70
-        //   offsets en v2: {0, 8, 4, 12} → escribe en mem[70,78,74,82]
+        // TEST 9: vsuxei32.v v9, (x1), v2  base=70
+        //   Instruccion: 32'h0620_E4A7  (rs1=x1, vs2=v2, mop=01, vs3=v9)
+        //   offsets v2: {0, 8, 4, 12} → escribe en mem[70,78,74,82]
         //   v9 = {4,2,3,1} → mem[70]=1, mem[74]=3, mem[78]=2, mem[82]=4
-        //   Instruccion: 32'h062064A7
         // =================================================================
         @(posedge clk); #1;
-        $display("\n[TEST 9] vsuxei32.v v9, (x0), v2  base=70 → DCache[70,78,74,82]");
-
-        i_instr     = 32'h062064A7;
-        i_base_addr = 32'd70;
-        i_valid     = 1;
-        @(posedge clk); #1; i_valid = 0;
+        $display("\n[TEST 9] vsuxei32.v v9, (x1), v2  base=70 → DCache[70,78,74,82]");
+        int_rf[1] = 32'd70;
+        du_i_instr = 32'h0620_E4A7;
+        @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+        @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;
         @(posedge clk); #1;

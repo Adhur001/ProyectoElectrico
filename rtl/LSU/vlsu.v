@@ -10,89 +10,6 @@
 
 
 // =============================================================================
-// DECODIFICADOR
-// Extrae y decodifica los campos de una instruccion RVV de 32 bits.
-// Logica puramente combinacional.
-//
-// Formato (cargas y stores comparten posicion de campos):
-//  31   29 28  27   26 25 24      20 19   15 14  12 11     7 6      0
-// [ nf ] [mew][mop][vm][lumop/rs2 ][ rs1  ][width][vd/vs3 ][ opcode ]
-//
-// mop encoding:
-//   00 = unit-stride   (bits[24:20] = lumop/sumop)
-//   10 = strided       (bits[24:20] = rs2, indice del registro de stride)
-//
-// lumop/sumop (mop=00): 00000=unit-stride  01000=whole-reg  01011=mask
-// =============================================================================
-
-module vlsu_decoder (
-    input  wire [31:0] i_instr,
-
-    output wire [4:0]  o_vd,              // registro vectorial destino (carga) / fuente (store)
-    output wire [4:0]  o_rs1,             // indice del registro escalar con la direccion base
-    output wire [4:0]  o_rs2,             // indice del registro escalar de stride (mop=10)
-    output wire [2:0]  o_width,           // EEW: 000=8b 101=16b 110=32b 111=64b
-    output wire        o_vm,              // 1=sin mascara, 0=enmascarado con v0
-    output wire [4:0]  o_lumop,           // lumop/sumop (mop=00) o rs2 idx (mop=10)
-    output wire [1:0]  o_mop,             // modo de direccionamiento
-    output wire [2:0]  o_nf,              // NFIELDS-1
-
-    // tipo de instruccion — unit-stride (mop=00)
-    output wire        o_is_load,         // opcode == 0000111
-    output wire        o_is_unit_stride,  // VLE<eew>.v   (load,  lumop=00000)
-    output wire        o_is_whole_reg,    // VL1RE32.v    (load,  lumop=01000)
-    output wire        o_is_mask_load,    // VLM.v        (load,  lumop=01011)
-    output wire        o_is_store,        // opcode == 0100111
-    output wire        o_is_unit_store,   // VSE<eew>.v   (store, sumop=00000)
-    output wire        o_is_whole_store,  // VS1R.v       (store, sumop=01000)
-    output wire        o_is_mask_store,   // VSM.v        (store, sumop=01011)
-
-    // tipo de instruccion — constant-stride (mop=10)
-    output wire        o_is_strided_load, // VLSE<eew>.v
-    output wire        o_is_strided_store,// VSSE<eew>.v
-
-    // tipo de instruccion — indexed unordered (mop=01)
-    output wire        o_is_indexed_load, // vluxei<eew>.v
-    output wire        o_is_indexed_store // vsuxei<eew>.v
-);
-
-    wire [6:0] opcode;
-    assign opcode = i_instr[6:0];
-
-    // Extraccion directa de campos
-    assign o_vd    = i_instr[11:7];
-    assign o_width = i_instr[14:12];
-    assign o_rs1   = i_instr[19:15];
-    assign o_rs2   = i_instr[24:20];  // rs2 idx (usado como stride en mop=10)
-    assign o_lumop = i_instr[24:20];  // mismo bits, alias semantico para mop=00
-    assign o_vm    = i_instr[25];
-    assign o_mop   = i_instr[27:26];
-    assign o_nf    = i_instr[31:29];
-
-    // Deteccion de opcode
-    assign o_is_load  = (opcode == 7'b0000111);
-    assign o_is_store = (opcode == 7'b0100111);
-
-    // Sub-tipos unit-stride (mop=00)
-    assign o_is_unit_stride = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b00000);
-    assign o_is_whole_reg   = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b01000);
-    assign o_is_mask_load   = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b01011);
-    assign o_is_unit_store  = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b00000);
-    assign o_is_whole_store = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b01000);
-    assign o_is_mask_store  = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b01011);
-
-    // Constant-stride (mop=10)
-    assign o_is_strided_load  = o_is_load  && (o_mop == 2'b10);
-    assign o_is_strided_store = o_is_store && (o_mop == 2'b10);
-
-    // Indexed unordered (mop=01)
-    assign o_is_indexed_load  = o_is_load  && (o_mop == 2'b01);
-    assign o_is_indexed_store = o_is_store && (o_mop == 2'b01);
-
-endmodule
-
-
-// =============================================================================
 // VLSU TOP
 //
 // Nota sobre rs1:
@@ -110,10 +27,18 @@ module vlsu (
     input  wire        clk,
     input  wire        rst,
 
-    input  wire        i_valid,           // instruccion valida en la entrada
-    input  wire [31:0] i_instr,           // instruccion RVV de 32 bits
-    input  wire [31:0] i_base_addr,       // direccion base (simula rs1 del host)
-    input  wire [31:0] i_stride,          // stride en bytes (simula rs2, para VLSE/VSSE)
+    input  wire        i_valid,           // instruccion valida (viene de o_vec_lsu_valid del decode)
+
+    // Campos pre-decodificados — vienen de Modified_DecodeUnit
+    input  wire [4:0]  i_vd,             // registro vectorial destino (carga) / fuente (store)
+    input  wire [4:0]  i_vs2,            // registro de offsets vs2 (indexed) / stride rs2
+    input  wire        i_is_load,        // opcode == 0000111
+    input  wire        i_is_store,       // opcode == 0100111
+    input  wire        i_is_mask_op,     // variante mascara (VLM / VSM)
+    input  wire        i_is_strided,     // modo constant-stride (mop=10)
+    input  wire        i_is_indexed,     // modo indexed-unordered (mop=01)
+    input  wire [31:0] i_base_addr,      // valor de rs1 leido del RF escalar (direccion base)
+    input  wire [31:0] i_stride,         // valor de rs2 leido del RF escalar (stride)
 
     // Interfaz con DCache
     output wire [31:0] o_mem_addr,        // direccion de acceso
@@ -138,47 +63,6 @@ module vlsu (
     output wire        o_scoreboard_clr,  // pulso: liberar vd al terminar carga
     output wire [4:0]  o_vd              // registro destino reclamado (cargas)
 );
-
-    // -------------------------------------------------------------------------
-    // Instancia del decodificador
-    // -------------------------------------------------------------------------
-    wire [4:0]  dec_vd;
-    wire [4:0]  dec_vs2;
-    wire        dec_is_load;
-    wire        dec_is_store;
-    wire        dec_is_mask_load;
-    wire        dec_is_mask_store;
-    wire        dec_is_strided_load;
-    wire        dec_is_strided_store;
-    wire        dec_is_indexed_load;
-    wire        dec_is_indexed_store;
-
-    vlsu_decoder decoder (
-        .i_instr            (i_instr),
-        .o_vd               (dec_vd),
-        .o_rs1              (),
-        .o_rs2              (dec_vs2),
-        .o_width            (),
-        .o_vm               (),
-        .o_lumop            (),
-        .o_mop              (),
-        .o_nf               (),
-        .o_is_load          (dec_is_load),
-        .o_is_unit_stride   (),
-        .o_is_whole_reg     (),
-        .o_is_mask_load     (dec_is_mask_load),
-        .o_is_store         (dec_is_store),
-        .o_is_unit_store    (),
-        .o_is_whole_store   (),
-        .o_is_mask_store    (dec_is_mask_store),
-        .o_is_strided_load  (dec_is_strided_load),
-        .o_is_strided_store (dec_is_strided_store),
-        .o_is_indexed_load  (dec_is_indexed_load),
-        .o_is_indexed_store (dec_is_indexed_store)
-    );
-
-    wire dec_valid_instr = dec_is_load || dec_is_store;
-    wire dec_is_mask_op  = dec_is_mask_load || dec_is_mask_store;
 
     // -------------------------------------------------------------------------
     // Estados de la FSM
@@ -228,18 +112,18 @@ module vlsu (
         end else begin
             case (state)
                 IDLE: begin
-                    if (i_valid && dec_valid_instr) begin
-                        vd_reg         <= dec_vd;
-                        vs2_reg        <= dec_vs2;
+                    if (i_valid) begin
+                        vd_reg         <= i_vd;
+                        vs2_reg        <= i_vs2;
                         base_addr_reg  <= i_base_addr;
                         stride_reg     <= i_stride;
-                        is_mask_reg    <= dec_is_mask_op;
-                        is_store_reg   <= dec_is_store;
-                        is_strided_reg <= dec_is_strided_load || dec_is_strided_store;
-                        is_indexed_reg <= dec_is_indexed_load || dec_is_indexed_store;
+                        is_mask_reg    <= i_is_mask_op;
+                        is_store_reg   <= i_is_store;
+                        is_strided_reg <= i_is_strided;
+                        is_indexed_reg <= i_is_indexed;
                         // captura los offsets de vs2 para indexed (puerto D del VRF)
                         offset_buf     <= i_vrf_offset;
-                        if (dec_is_store) begin
+                        if (i_is_store) begin
                             // captura los 128 bits de vs3 desde el VRF (puerto C)
                             asm_buf <= i_vrf_rdata;
                             state   <= SWRITE_0;
@@ -330,17 +214,17 @@ module vlsu (
 
     // o_vs3: presenta el indice de vs3 combinacionalmente en IDLE para que
     // i_vrf_rdata este listo antes del flanco que captura asm_buf
-    assign o_vs3 = (state == IDLE) ? dec_vd : vd_reg;
+    assign o_vs3 = (state == IDLE) ? i_vd : vd_reg;
 
     // o_vs2: presenta el indice de vs2 combinacionalmente en IDLE para que
     // i_vrf_offset este listo antes del flanco que captura offset_buf
-    assign o_vs2 = (state == IDLE) ? dec_vs2 : vs2_reg;
+    assign o_vs2 = (state == IDLE) ? i_vs2 : vs2_reg;
 
     // -------------------------------------------------------------------------
     // Logica combinacional: scoreboard
     // Solo las cargas reclaman un registro destino
     // -------------------------------------------------------------------------
-    assign o_scoreboard_set = (state == IDLE) && i_valid && dec_is_load;
+    assign o_scoreboard_set = (state == IDLE) && i_valid && i_is_load;
     assign o_scoreboard_clr = (state == WRITEBACK);
 
     assign o_busy = (state != IDLE);

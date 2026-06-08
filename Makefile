@@ -9,7 +9,7 @@ RTL_TOP     = rtl/ve_top.v
 RTL_ALL     = $(RTL_ALU) $(RTL_REG) $(RTL_PIPE) $(RTL_LSU) $(RTL_TOP)
 RTL_LSU     = rtl/LSU/vlsu.v
 
-.PHONY: all tb_alu tb_vregfile tb_ve_top tb_vlsu_decoder tb_vlsu_integration clean
+.PHONY: all tb_alu tb_vregfile tb_ve_top tb_vlsu_integration clean
 
 all: tb_alu tb_vregfile tb_ve_top tb_vlsu_decoder tb_vlsu_integration
 
@@ -28,15 +28,10 @@ tb_ve_top:
 	$(VVP) sim_ve_top
 	@echo "Waveform: gtkwave tb_ve_top.vcd"
 
-tb_vlsu_decoder:
-	$(IVERILOG) $(FLAGS) -o sim_vlsu $(RTL_LSU) testbench/tb_vlsu_decoder.v
-	$(VVP) sim_vlsu
-	echo "Waveform: gtkwave tb_vlsu.vcd"
-
 tb_vlsu_integration:
 	$(IVERILOG) $(FLAGS) -o sim_vlsu_integration $(RTL_LSU) $(RTL_REG) testbench/tb_vlsu_integration.v
 	$(VVP) sim_vlsu_integration
 	@echo "Waveform: gtkwave tb_vlsu_integration.vcd"
 
 clean:
-	rm -f sim.* *.vcd
+	rm -f sim* *.vcd

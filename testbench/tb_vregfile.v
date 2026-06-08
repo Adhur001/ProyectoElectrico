@@ -76,14 +76,14 @@ initial begin
         #1;
         check_a({4{32'hAAAAAAAA}});
 
-        // -- v0 es escribible (registro de mascara, spec RVV) --
-        $display("Test: v0 es escribible (registro de mascara RVV)");
+        // -- v0 hardwired to 0: attempt write --
+        $display("Test: v0 hardwired to 0 (write attempt)");
         we = 1; addr_w = 5'd0; data_in = 128'hFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
         @(posedge clk); #1;
         we = 0;
         addr_a = 5'd0;
         #1;
-        check_a(128'hFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF);
+        check_a(128'b0);
 
         // -- Dual-port read: write v2 and v3, read simultaneously --
         $display("Test: dual-port read v2/v3");

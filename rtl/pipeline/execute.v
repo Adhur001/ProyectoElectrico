@@ -3,7 +3,7 @@ module execute (
     input         rst,
 
     input         i_valid,
-    input  [2:0]  i_alu_op,
+    input  [3:0]  i_alu_op,
     input  [4:0]  i_rd,
     input  [127:0] i_vs1_data,
     input  [127:0] i_vs2_data,

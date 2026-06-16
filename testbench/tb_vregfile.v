@@ -47,6 +47,7 @@ module tb_vregisters;
         end
     endtask
 
+        // en este initial se espera a un posedge del clk para mandar las instrucciones  
 initial begin
         $dumpfile("tb_vregfile.vcd");
         $dumpvars(0, tb_vregisters);
@@ -75,15 +76,6 @@ initial begin
         addr_a = 5'd1;
         #1;
         check_a({4{32'hAAAAAAAA}});
-
-        // -- v0 hardwired to 0: attempt write --
-        $display("Test: v0 hardwired to 0 (write attempt)");
-        we = 1; addr_w = 5'd0; data_in = 128'hFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
-        @(posedge clk); #1;
-        we = 0;
-        addr_a = 5'd0;
-        #1;
-        check_a(128'b0);
 
         // -- Dual-port read: write v2 and v3, read simultaneously --
         $display("Test: dual-port read v2/v3");

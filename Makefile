@@ -4,7 +4,7 @@ FLAGS    = -g2012
 
 RTL_ALU     = rtl/alu/alu.v rtl/alu/alu_array.v
 RTL_REG     = rtl/vregfile/vregisters.v
-RTL_PIPE    = rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/writeback.v
+RTL_PIPE    = rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/mem.v rtl/pipeline/writeback.v
 RTL_LSU     = rtl/LSU/vlsu.v
 RTL_TOP     = rtl/ve_top.v
 RTL_DECODE  = risc-v_RV32I/Modified_DecodeUnit.v
@@ -22,7 +22,7 @@ tb_alu:
 tb_vregfile:
 	$(IVERILOG) $(FLAGS) -o sim_vregisters $(RTL_REG) testbench/tb_vregfile.v
 	$(VVP) sim_vregisters
-	@echo "Waveform: gtkwave tb_vregisters.vcd"
+	@echo "Waveform: gtkwave tb_vregfile.vcd"
 
 tb_ve_top:
 	$(IVERILOG) $(FLAGS) -o sim_ve_top $(RTL_ALL) $(RTL_DECODE) testbench/tb_ve_top.v
@@ -30,7 +30,7 @@ tb_ve_top:
 	@echo "Waveform: gtkwave tb_ve_top.vcd"
 
 tb_vlsu_integration:
-	$(IVERILOG) $(FLAGS) -o sim_vlsu_integration $(RTL_LSU) $(RTL_REG) $(RTL_DECODE) testbench/tb_vlsu_integration.v
+	$(IVERILOG) $(FLAGS) -o sim_vlsu_integration $(RTL_LSU) testbench/tb_vlsu_integration.v
 	$(VVP) sim_vlsu_integration
 	@echo "Waveform: gtkwave tb_vlsu_integration.vcd"
 

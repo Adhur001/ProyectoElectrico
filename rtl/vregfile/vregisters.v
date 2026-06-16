@@ -17,7 +17,7 @@ module vregisters (
 
     integer j;
     always @(posedge clk) begin
-        if (rst) begin
+        if (rst) begin      // El reset pone todos los registros zero  
             for (j = 0; j < 32; j = j + 1)
                 regs[j] <= 128'b0;
         end else if (we) begin

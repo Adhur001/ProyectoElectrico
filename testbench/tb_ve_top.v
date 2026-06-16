@@ -8,7 +8,7 @@ module tb_ve_top;
     // Registro entero simulado: el decode lee rs1/rs2 de aqui
     reg [31:0] int_rf [0:31];
 
-    // DCache simulada
+    // DCache simulada — puerto A
     wire [31:0] o_mem_addr;
     wire        o_mem_read_en;
     reg  [31:0] i_mem_rdata;
@@ -16,10 +16,23 @@ module tb_ve_top;
     wire [31:0] o_mem_wdata;
     wire [3:0]  o_mem_byte_en;
 
+    // DCache simulada — puerto B
+    wire [31:0] o_mem_addr_b;
+    wire        o_mem_read_en_b;
+    reg  [31:0] i_mem_rdata_b;
+    wire        o_mem_write_en_b;
+    wire [31:0] o_mem_wdata_b;
+    wire [3:0]  o_mem_byte_en_b;
+
+    // Stall del pipeline vectorial hacia el decode escalar
+    wire stall;
+
     reg [31:0] mem [0:127];
+
+    // Modelo de DCache: lecturas combinacionales, escrituras sincronas
     always @(*) begin
-        if (o_mem_read_en) i_mem_rdata = mem[o_mem_addr[6:0]];
-        else               i_mem_rdata = 32'b0;
+        i_mem_rdata  = o_mem_read_en   ? mem[o_mem_addr[6:0]]   : 32'b0;
+        i_mem_rdata_b = o_mem_read_en_b ? mem[o_mem_addr_b[6:0]] : 32'b0;
     end
     always @(posedge clk) begin
         if (o_mem_write_en) begin
@@ -27,6 +40,12 @@ module tb_ve_top;
             if (o_mem_byte_en[1]) mem[o_mem_addr[6:0]][15:8]  <= o_mem_wdata[15:8];
             if (o_mem_byte_en[2]) mem[o_mem_addr[6:0]][23:16] <= o_mem_wdata[23:16];
             if (o_mem_byte_en[3]) mem[o_mem_addr[6:0]][31:24] <= o_mem_wdata[31:24];
+        end
+        if (o_mem_write_en_b) begin
+            if (o_mem_byte_en_b[0]) mem[o_mem_addr_b[6:0]][7:0]   <= o_mem_wdata_b[7:0];
+            if (o_mem_byte_en_b[1]) mem[o_mem_addr_b[6:0]][15:8]  <= o_mem_wdata_b[15:8];
+            if (o_mem_byte_en_b[2]) mem[o_mem_addr_b[6:0]][23:16] <= o_mem_wdata_b[23:16];
+            if (o_mem_byte_en_b[3]) mem[o_mem_addr_b[6:0]][31:24] <= o_mem_wdata_b[31:24];
         end
     end
 
@@ -54,7 +73,7 @@ module tb_ve_top;
         .CLK            (clk),
         .RST            (rst),
         .FLUSH          (1'b0),
-        .STALL          (1'b0),
+        .STALL          (stall),
         .i_instr        (du_i_instr),
         .i_pc           (32'b0),
         .i_bubble       (1'b0),
@@ -78,7 +97,7 @@ module tb_ve_top;
         .o_vec_is_indexed (du_o_vec_is_indexed),
         .o_vec_base_addr  (du_o_vec_base_addr),
         .o_vec_stride     (du_o_vec_stride),
-        // unused scalar pipeline outputs
+        // outputs del pipeline escalar no usados aqui
         .o_rs1_2_pc     (),
         .o_is_branch    (),
         .o_is_type_u    (),
@@ -117,12 +136,19 @@ module tb_ve_top;
         .i_is_indexed (du_o_vec_is_indexed),
         .i_base_addr  (du_o_vec_base_addr),
         .i_stride     (du_o_vec_stride),
-        .o_mem_addr    (o_mem_addr),
-        .o_mem_read_en (o_mem_read_en),
-        .i_mem_rdata   (i_mem_rdata),
-        .o_mem_write_en(o_mem_write_en),
-        .o_mem_wdata   (o_mem_wdata),
-        .o_mem_byte_en (o_mem_byte_en)
+        .o_stall         (stall),
+        .o_mem_addr      (o_mem_addr),
+        .o_mem_read_en   (o_mem_read_en),
+        .i_mem_rdata     (i_mem_rdata),
+        .o_mem_write_en  (o_mem_write_en),
+        .o_mem_wdata     (o_mem_wdata),
+        .o_mem_byte_en   (o_mem_byte_en),
+        .o_mem_addr_b    (o_mem_addr_b),
+        .o_mem_read_en_b (o_mem_read_en_b),
+        .i_mem_rdata_b   (i_mem_rdata_b),
+        .o_mem_write_en_b(o_mem_write_en_b),
+        .o_mem_wdata_b   (o_mem_wdata_b),
+        .o_mem_byte_en_b (o_mem_byte_en_b)
     );
 
     initial clk = 0;
@@ -130,18 +156,48 @@ module tb_ve_top;
 
     integer pass = 0, fail = 0;
 
-    // Envia instruccion ALU a traves del decode unit y espera pipeline (3 ciclos)
-    // Latencia: 1 ciclo decode + 3 ciclos pipeline = 5 @posedge totales
+    // Envia una instruccion ALU a traves del decode y espera 4 etapas de pipeline.
+    // Latencia total: 1 decode + 4 pipeline (Issue+Execute+MEM+WB) = 5 posedges
     task send_alu;
         input [31:0] instr;
         begin
             @(posedge clk); #1;
-            du_i_instr = instr;          // presentar instruccion al decode
-            @(posedge clk); #1;          // decode captura → o_vec_valid=1
-            du_i_instr = 32'h0000_0013; // NOP (ADDI x0,x0,0)
-            @(posedge clk); #1;          // issue captura
-            @(posedge clk); #1;          // execute captura
-            @(posedge clk); #1;          // VRF write
+            du_i_instr = instr;
+            @(posedge clk); #1; du_i_instr = 32'h0000_0013; // NOP
+            @(posedge clk); #1; // Issue captura
+            @(posedge clk); #1; // Execute
+            @(posedge clk); #1; // MEM
+            @(posedge clk); #1; // WB escribe VRF
+        end
+    endtask
+
+    // Envia una instruccion LSU de carga y espera que complete.
+    // Latencia: 1 decode + Issue + Execute(ACCESS_01) + MEM(ACCESS_23) + WB = 5 posedges
+    task send_load;
+        input [31:0] instr;
+        begin
+            @(posedge clk); #1;
+            du_i_instr = instr;
+            @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+            @(posedge clk); #1; // Issue
+            @(posedge clk); #1; // Execute: ACCESS_01
+            @(posedge clk); #1; // MEM: ACCESS_23
+            @(posedge clk); #1; // WB: escribe VRF
+        end
+    endtask
+
+    // Envia una instruccion LSU de store y espera que complete.
+    // Latencia: 1 decode + Issue + Execute(SWRITE_01) + MEM(SWRITE_23) + WB(pass) = 5 posedges
+    task send_store;
+        input [31:0] instr;
+        begin
+            @(posedge clk); #1;
+            du_i_instr = instr;
+            @(posedge clk); #1; du_i_instr = 32'h0000_0013;
+            @(posedge clk); #1; // Issue
+            @(posedge clk); #1; // Execute: SWRITE_01
+            @(posedge clk); #1; // MEM: SWRITE_23
+            @(posedge clk); #1; // WB: pass-through (stores no escriben VRF)
         end
     endtask
 
@@ -160,6 +216,21 @@ module tb_ve_top;
         end
     endtask
 
+    task check_mem;
+        input [6:0]  addr;
+        input [31:0] expected;
+        begin
+            if (mem[addr] === expected) begin
+                $display("  PASS mem[%0d] = %h", addr, mem[addr]);
+                pass = pass + 1;
+            end else begin
+                $display("  FAIL mem[%0d]: got %h, expected %h",
+                         addr, mem[addr], expected);
+                fail = fail + 1;
+            end
+        end
+    endtask
+
     initial begin
         $dumpfile("tb_vext.vcd");
         $dumpvars(0, tb_ve_top);
@@ -169,50 +240,196 @@ module tb_ve_top;
         repeat(2) @(posedge clk); #1;
         rst = 0;
 
-        // Pre-cargar registros operando via acceso jerarquico
-        dut.vregfile.regs[1] = {4{32'hA}};        // v1 = {10,10,10,10}
-        dut.vregfile.regs[2] = {4{32'h14}};       // v2 = {20,20,20,20}
-        dut.vregfile.regs[5] = {4{32'hFF00FF00}};
-        dut.vregfile.regs[6] = {4{32'h0F0F0F0F}};
-        dut.vregfile.regs[7] = {4{32'hAAAAAAAA}};
-        dut.vregfile.regs[8] = {4{32'h55555555}};
+        // Pre-cargar registros vectoriales
+        dut.vregfile.regs[1]  = {4{32'hA}};
+        dut.vregfile.regs[2]  = {4{32'h14}};
+        dut.vregfile.regs[5]  = {4{32'hFF00FF00}};
+        dut.vregfile.regs[6]  = {4{32'h0F0F0F0F}};
+        dut.vregfile.regs[7]  = {4{32'hAAAAAAAA}};
+        dut.vregfile.regs[8]  = {4{32'h55555555}};
 
-        // VADD v3 = v1 + v2 : {30,...}  instr=32'h002081D7
-        $display("Test: VADD v3 = v1 + v2");
+        // Pre-cargar DCache para pruebas de carga (indices = direcciones en bytes)
+        // Bloque A: palabras a byte 0..12 (step=4, unit-stride)
+        mem[0]  = 32'hDEAD_BEEF;
+        mem[4]  = 32'hCAFE_BABE;
+        mem[8]  = 32'h1234_5678;
+        mem[12] = 32'h9ABC_DEF0;
+
+        // Bloque B: palabras a byte 20..32 (base_addr=20)
+        mem[20] = 32'h0000_0001;
+        mem[24] = 32'h0000_0002;
+        mem[28] = 32'h0000_0003;
+        mem[32] = 32'h0000_0004;
+
+        // Bloque C: stride/indexed tests (base=80, step=8)
+        mem[80]  = 32'hA1A1_A1A1;
+        mem[88]  = 32'hB2B2_B2B2;
+        mem[96]  = 32'hC3C3_C3C3;
+        mem[104] = 32'hD4D4_D4D4;
+
+        // Bloque D: mask tests
+        mem[110] = 32'h1234_5678;   // fuente VLM
+        mem[114] = 32'h0000_0000;   // destino VSM (pre-inicializado)
+
+        // =====================================================================
+        // Tests ALU
+        // =====================================================================
+
+        // VADD v3 = v1 + v2 → {30,30,30,30}
+        $display("\nTest ALU-1: VADD v3 = v1 + v2");
         send_alu(32'h002081D7);
         check_reg(5'd3, {4{32'h1E}});
 
-        // VSUB v4 = v2 - v1 : {10,...}  funct7[5]=1,funct3=000,rs2=1,rs1=2,rd=4
-        $display("Test: VSUB v4 = v2 - v1");
+        // VSUB v4 = v2 - v1 → {10,10,10,10}
+        $display("\nTest ALU-2: VSUB v4 = v2 - v1");
         send_alu(32'h40110257);
         check_reg(5'd4, {4{32'hA}});
 
-        // VAND v9 = v5 & v6  funct7=0,funct3=111,rs2=6,rs1=5,rd=9
-        $display("Test: VAND v9 = v5 & v6");
+        // VAND v9 = v5 & v6
+        $display("\nTest ALU-3: VAND v9 = v5 & v6");
         send_alu(32'h0062F4D7);
         check_reg(5'd9, {4{32'h0F000F00}});
 
-        // VOR v10 = v7 | v8  funct7=0,funct3=110,rs2=8,rs1=7,rd=10
-        $display("Test: VOR v10 = v7 | v8");
+        // VOR v10 = v7 | v8
+        $display("\nTest ALU-4: VOR v10 = v7 | v8");
         send_alu(32'h0083E557);
         check_reg(5'd10, {4{32'hFFFFFFFF}});
 
-        // VXOR v11 = v7 ^ v8  instr=32'h0083C5D7
-        $display("Test: VXOR v11 = v7 ^ v8");
+        // VXOR v11 = v7 ^ v8
+        $display("\nTest ALU-5: VXOR v11 = v7 ^ v8");
         send_alu(32'h0083C5D7);
         check_reg(5'd11, {4{32'hFFFFFFFF}});
 
-        // VADD v0 = v1 + v2 (v0 es escribible)  instr=32'h00208057
-        $display("Test: VADD v0 = v1 + v2 (v0 es escribible)");
+        // VADD v0 = v1 + v2 (v0 es escribible)
+        $display("\nTest ALU-6: VADD v0 = v1 + v2");
         send_alu(32'h00208057);
         check_reg(5'd0, {4{32'h1E}});
 
-        // VADD v12 = v0 + v2 : v0=30, v2=20 → 50  instr=32'h00200657
-        $display("Test: VADD v12 = v0 + v2 (v0 como fuente con valor 30)");
+        // VADD v12 = v0 + v2 : 30+20=50
+        $display("\nTest ALU-7: VADD v12 = v0 + v2");
         send_alu(32'h00200657);
         check_reg(5'd12, {4{32'h32}});
 
-        $display("=== Results: %0d passed, %0d failed ===", pass, fail);
+        // =====================================================================
+        // Tests LSU — Load
+        // VLE32.v: opcode=0000111, funct3=110, mop=00 (bits[27:26]), vm=1 (bit[25])
+        // int_rf[1] = base_addr (rs1=x1)
+        // =====================================================================
+
+        // TEST LSU-1: VLE32.v v13, (x1)  base=0
+        //   addr_0=0,4,8,12 → mem[0..12]
+        //   Esperado v13 = {9ABCDEF0, 12345678, CAFEBABE, DEADBEEF}
+        $display("\nTest LSU-1: VLE32.v v13, (x1)  base=0");
+        int_rf[1] = 32'd0;
+        send_load(32'h0200_E687);   // vd=v13, rs1=x1
+        check_reg(5'd13, {32'h9ABC_DEF0, 32'h1234_5678, 32'hCAFE_BABE, 32'hDEAD_BEEF});
+
+        // TEST LSU-2: VLE32.v v14, (x1)  base=20
+        //   addr_0=20,24,28,32 → mem[20..32]
+        //   Esperado v14 = {4,3,2,1}
+        $display("\nTest LSU-2: VLE32.v v14, (x1)  base=20");
+        int_rf[1] = 32'd20;
+        send_load(32'h0200_E707);   // vd=v14, rs1=x1
+        check_reg(5'd14, {32'd4, 32'd3, 32'd2, 32'd1});
+
+        // =====================================================================
+        // Tests LSU — Store
+        // VSE32.v: opcode=0100111, funct3=110, mop=00, vm=1
+        // vs3 codificado en el campo rd (bits[11:7])
+        // =====================================================================
+
+        // TEST LSU-3: VSE32.v v13, (x1)  base=40
+        //   Escribe v13={9ABCDEF0,12345678,CAFEBABE,DEADBEEF} a mem[40,44,48,52]
+        $display("\nTest LSU-3: VSE32.v v13, (x1)  base=40");
+        int_rf[1] = 32'd40;
+        send_store(32'h0200_E6A7);  // vs3=v13 (rd=13=01101), rs1=x1
+        check_mem(7'd40, 32'hDEAD_BEEF);
+        check_mem(7'd44, 32'hCAFE_BABE);
+        check_mem(7'd48, 32'h1234_5678);
+        check_mem(7'd52, 32'h9ABC_DEF0);
+
+        // TEST LSU-4: VSE32.v v14, (x1)  base=60
+        //   Escribe v14={4,3,2,1} a mem[60,64,68,72]
+        $display("\nTest LSU-4: VSE32.v v14, (x1)  base=60");
+        int_rf[1] = 32'd60;
+        send_store(32'h0200_E727);  // vs3=v14 (rd=14=01110), rs1=x1
+        check_mem(7'd60, 32'd1);
+        check_mem(7'd64, 32'd2);
+        check_mem(7'd68, 32'd3);
+        check_mem(7'd72, 32'd4);
+
+        // =====================================================================
+        // Tests LSU — Strided
+        // VLSE32.v: mop=10 (bits[27:26]), rs2=stride scalar register
+        // VSSE32.v: same encoding, opcode=0100111
+        // =====================================================================
+
+        // TEST LSU-5: VLSE32.v v15, (x1=80), x2=8
+        //   step=8 → addr: 80,88,96,104 → {D4D4D4D4,C3C3C3C3,B2B2B2B2,A1A1A1A1}
+        $display("\nTest LSU-5: VLSE32.v v15, (x1=80), x2=8");
+        int_rf[1] = 32'd80;
+        int_rf[2] = 32'd8;
+        send_load(32'h0A20_E787);
+        check_reg(5'd15, {32'hD4D4_D4D4, 32'hC3C3_C3C3, 32'hB2B2_B2B2, 32'hA1A1_A1A1});
+
+        // TEST LSU-6: VSSE32.v v15, (x1=100), x2=8
+        //   Escribe v15 a mem[100,108,116,124] con step=8
+        $display("\nTest LSU-6: VSSE32.v v15, (x1=100), x2=8");
+        int_rf[1] = 32'd100;
+        int_rf[2] = 32'd8;
+        send_store(32'h0A20_E7A7);
+        check_mem(7'd100, 32'hA1A1_A1A1);
+        check_mem(7'd108, 32'hB2B2_B2B2);
+        check_mem(7'd116, 32'hC3C3_C3C3);
+        check_mem(7'd124, 32'hD4D4_D4D4);
+
+        // =====================================================================
+        // Tests LSU — Indexed
+        // vluxei32.v: mop=01 (bits[27:26]), bits[24:20]=vs2 (vector register)
+        // vsuxei32.v: same, opcode=0100111
+        // v2 se carga con offsets {0,8,16,24} (un offset por elemento)
+        // =====================================================================
+        dut.vregfile.regs[2] = {32'd24, 32'd16, 32'd8, 32'd0};
+
+        // TEST LSU-7: vluxei32.v v16, (x1=80), v2
+        //   offsets v2={0,8,16,24} → addr: 80,88,96,104 → {D4,C3,B2,A1}
+        $display("\nTest LSU-7: vluxei32.v v16, (x1=80), v2={0,8,16,24}");
+        int_rf[1] = 32'd80;
+        send_load(32'h0620_E807);
+        check_reg(5'd16, {32'hD4D4_D4D4, 32'hC3C3_C3C3, 32'hB2B2_B2B2, 32'hA1A1_A1A1});
+
+        // TEST LSU-8: vsuxei32.v v16, (x1=100), v2
+        //   offsets {0,8,16,24} → escribe v16 a mem[100,108,116,124]
+        $display("\nTest LSU-8: vsuxei32.v v16, (x1=100), v2={0,8,16,24}");
+        int_rf[1] = 32'd100;
+        send_store(32'h0620_E827);
+        check_mem(7'd100, 32'hA1A1_A1A1);
+        check_mem(7'd108, 32'hB2B2_B2B2);
+        check_mem(7'd116, 32'hC3C3_C3C3);
+        check_mem(7'd124, 32'hD4D4_D4D4);
+
+        // =====================================================================
+        // Tests LSU — Mask (VLM / VSM)
+        // mop=00 (unit-stride), lumop=01011 → is_mask_op=1
+        // VLM: carga 1 byte → VRF = {120'b0, byte[7:0]}
+        // VSM: escribe 1 byte con byte_en=0001 (ACCESS_23 omitido)
+        // =====================================================================
+
+        // TEST LSU-9: VLM.v v17, (x1=110)
+        //   mem[110]=0x12345678 → byte0=0x78 → v17={120'b0, 8'h78}
+        $display("\nTest LSU-9: VLM.v v17, (x1=110)");
+        int_rf[1] = 32'd110;
+        send_load(32'h02B0_8887);
+        check_reg(5'd17, {120'b0, 8'h78});
+
+        // TEST LSU-10: VSM.v v17, (x1=114)
+        //   v17[7:0]=0x78, byte_en=0001 → mem[114][7:0]=0x78
+        $display("\nTest LSU-10: VSM.v v17, (x1=114)");
+        int_rf[1] = 32'd114;
+        send_store(32'h02B0_88A7);
+        check_mem(7'd114, 32'h0000_0078);
+
+        $display("\n=== Results: %0d passed, %0d failed ===", pass, fail);
         $finish;
     end
 endmodule

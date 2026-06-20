@@ -39,7 +39,19 @@ module execute (
     output reg [31:0] o_stride,
     output reg [127:0] o_vs3_data,
     output reg [127:0] o_offset_buf,
-    output reg [63:0]  o_asm_lo   // rdata de ACCESS_01 para cargas
+    output reg [63:0]  o_asm_lo,  // rdata de ACCESS_01 para cargas
+
+    // DCache ACCESS_01 — salidas combinacionales del VLSU
+    output wire [31:0] o_mem_addr,
+    output wire        o_mem_read_en,
+    output wire        o_mem_write_en,
+    output wire [31:0] o_mem_wdata,
+    output wire [3:0]  o_mem_byte_en,
+    output wire [31:0] o_mem_addr_b,
+    output wire        o_mem_read_en_b,
+    output wire        o_mem_write_en_b,
+    output wire [31:0] o_mem_wdata_b,
+    output wire [3:0]  o_mem_byte_en_b
 );
 
     wire [127:0] alu_out;
@@ -49,6 +61,32 @@ module execute (
         .in_a   (i_vs1_data),
         .in_b   (i_vs2_data),
         .out    (alu_out)
+    );
+
+    // i_stall=1: la instruccion LSU en la entrada es VLSE32 esperando a entrar a execute,
+    // no debe acceder a DCache todavia — MEM ya esta usando el bus este ciclo.
+    vlsu lsu_access01 (
+        .i_phase         (2'b00),
+        .i_en            (i_is_lsu && !i_stall),
+        .i_is_load       (i_is_load),
+        .i_is_store      (i_is_store),
+        .i_is_mask_op    (i_is_mask_op),
+        .i_is_strided    (i_is_strided),
+        .i_is_indexed    (i_is_indexed),
+        .i_base_addr     (i_base_addr),
+        .i_stride        (i_stride),
+        .i_offset_buf    (i_offset_buf),
+        .i_wdata         (i_vs3_data),
+        .o_mem_addr      (o_mem_addr),
+        .o_mem_read_en   (o_mem_read_en),
+        .o_mem_write_en  (o_mem_write_en),
+        .o_mem_wdata     (o_mem_wdata),
+        .o_mem_byte_en   (o_mem_byte_en),
+        .o_mem_addr_b    (o_mem_addr_b),
+        .o_mem_read_en_b (o_mem_read_en_b),
+        .o_mem_write_en_b(o_mem_write_en_b),
+        .o_mem_wdata_b   (o_mem_wdata_b),
+        .o_mem_byte_en_b (o_mem_byte_en_b)
     );
 
     always @(posedge clk) begin

@@ -109,52 +109,33 @@ module ve_top (
     assign o_stall = stall;
 
     // =========================================================================
-    // Logica del VLSU: selector de fase entre Execute (ACCESS_01) y MEM (ACCESS_23)
-    //
-    // MEM tiene prioridad. La condicion de stall garantiza que Execute y MEM
-    // no accedan a DCache al mismo tiempo (excepto MEM con mask, que se salta
-    // ACCESS_23 y no activa el VLSU en esa etapa).
+    // Mux de salidas DCache: Execute (ACCESS_01) o MEM (ACCESS_23)
+    // El stall garantiza que nunca esten activos al mismo tiempo.
+    // MEM tiene prioridad por simetria con el diseno anterior.
     // =========================================================================
-    wire mem_vlsu_en = s2_is_lsu && !s2_is_mask_op;
-    wire exe_vlsu_en = s1_is_lsu && !s2_is_lsu; // equivale a s1_is_lsu && !stall
+    wire [31:0] exe_mem_addr,       mem_mem_addr;
+    wire        exe_mem_read_en,    mem_mem_read_en;
+    wire        exe_mem_write_en,   mem_mem_write_en;
+    wire [31:0] exe_mem_wdata,      mem_mem_wdata;
+    wire [3:0]  exe_mem_byte_en,    mem_mem_byte_en;
+    wire [31:0] exe_mem_addr_b,     mem_mem_addr_b;
+    wire        exe_mem_read_en_b,  mem_mem_read_en_b;
+    wire        exe_mem_write_en_b, mem_mem_write_en_b;
+    wire [31:0] exe_mem_wdata_b,    mem_mem_wdata_b;
+    wire [3:0]  exe_mem_byte_en_b,  mem_mem_byte_en_b;
 
-    wire vlsu_en    = mem_vlsu_en || exe_vlsu_en;
-    wire [1:0] vlsu_phase = mem_vlsu_en ? 2'b01 : 2'b00;
+    wire sel_mem = s2_is_lsu && !s2_is_mask_op;
 
-    // Mux de entradas al VLSU (MEM tiene prioridad)
-    wire        vlsu_is_load    = mem_vlsu_en ? s2_is_load    : s1_is_load;
-    wire        vlsu_is_store   = mem_vlsu_en ? s2_is_store   : s1_is_store;
-    wire        vlsu_is_mask_op = mem_vlsu_en ? s2_is_mask_op : s1_is_mask_op;
-    wire        vlsu_is_strided = mem_vlsu_en ? s2_is_strided : s1_is_strided;
-    wire        vlsu_is_indexed = mem_vlsu_en ? s2_is_indexed : s1_is_indexed;
-    wire [31:0] vlsu_base_addr  = mem_vlsu_en ? s2_base_addr  : s1_base_addr;
-    wire [31:0] vlsu_stride     = mem_vlsu_en ? s2_stride     : s1_stride;
-    wire [127:0] vlsu_offset_buf = mem_vlsu_en ? s2_offset_buf : s1_offset_buf;
-    wire [127:0] vlsu_wdata     = mem_vlsu_en ? s2_vs3_data   : s1_vs3_data;
-
-    vlsu lsu (
-        .i_phase          (vlsu_phase),
-        .i_en             (vlsu_en),
-        .i_is_load        (vlsu_is_load),
-        .i_is_store       (vlsu_is_store),
-        .i_is_mask_op     (vlsu_is_mask_op),
-        .i_is_strided     (vlsu_is_strided),
-        .i_is_indexed     (vlsu_is_indexed),
-        .i_base_addr      (vlsu_base_addr),
-        .i_stride         (vlsu_stride),
-        .i_offset_buf     (vlsu_offset_buf),
-        .i_wdata          (vlsu_wdata),
-        .o_mem_addr       (o_mem_addr),
-        .o_mem_read_en    (o_mem_read_en),
-        .o_mem_write_en   (o_mem_write_en),
-        .o_mem_wdata      (o_mem_wdata),
-        .o_mem_byte_en    (o_mem_byte_en),
-        .o_mem_addr_b     (o_mem_addr_b),
-        .o_mem_read_en_b  (o_mem_read_en_b),
-        .o_mem_write_en_b (o_mem_write_en_b),
-        .o_mem_wdata_b    (o_mem_wdata_b),
-        .o_mem_byte_en_b  (o_mem_byte_en_b)
-    );
+    assign o_mem_addr       = sel_mem ? mem_mem_addr       : exe_mem_addr;
+    assign o_mem_read_en    = sel_mem ? mem_mem_read_en    : exe_mem_read_en;
+    assign o_mem_write_en   = sel_mem ? mem_mem_write_en   : exe_mem_write_en;
+    assign o_mem_wdata      = sel_mem ? mem_mem_wdata      : exe_mem_wdata;
+    assign o_mem_byte_en    = sel_mem ? mem_mem_byte_en    : exe_mem_byte_en;
+    assign o_mem_addr_b     = sel_mem ? mem_mem_addr_b     : exe_mem_addr_b;
+    assign o_mem_read_en_b  = sel_mem ? mem_mem_read_en_b  : exe_mem_read_en_b;
+    assign o_mem_write_en_b = sel_mem ? mem_mem_write_en_b : exe_mem_write_en_b;
+    assign o_mem_wdata_b    = sel_mem ? mem_mem_wdata_b    : exe_mem_wdata_b;
+    assign o_mem_byte_en_b  = sel_mem ? mem_mem_byte_en_b  : exe_mem_byte_en_b;
 
     // =========================================================================
     // Pipeline: Issue → Execute → MEM → Writeback
@@ -223,9 +204,19 @@ module ve_top (
         .i_stride     (s1_stride),
         .i_vs3_data   (s1_vs3_data),
         .i_offset_buf (s1_offset_buf),
-        .i_mem_rdata  (i_mem_rdata),
-        .i_mem_rdata_b(i_mem_rdata_b),
-        .o_valid      (s2_valid),
+        .i_mem_rdata      (i_mem_rdata),
+        .i_mem_rdata_b    (i_mem_rdata_b),
+        .o_mem_addr       (exe_mem_addr),
+        .o_mem_read_en    (exe_mem_read_en),
+        .o_mem_write_en   (exe_mem_write_en),
+        .o_mem_wdata      (exe_mem_wdata),
+        .o_mem_byte_en    (exe_mem_byte_en),
+        .o_mem_addr_b     (exe_mem_addr_b),
+        .o_mem_read_en_b  (exe_mem_read_en_b),
+        .o_mem_write_en_b (exe_mem_write_en_b),
+        .o_mem_wdata_b    (exe_mem_wdata_b),
+        .o_mem_byte_en_b  (exe_mem_byte_en_b),
+        .o_valid          (s2_valid),
         .o_is_lsu     (s2_is_lsu),
         .o_rd         (s2_rd),
         .o_result     (s2_result),
@@ -242,22 +233,38 @@ module ve_top (
     );
 
     mem stage3 (
-        .clk           (clk),
-        .rst           (rst),
-        .i_valid       (s2_valid),
-        .i_is_lsu      (s2_is_lsu),
-        .i_is_load     (s2_is_load),
-        .i_is_store    (s2_is_store),
-        .i_is_mask_op  (s2_is_mask_op),
-        .i_rd          (s2_rd),
-        .i_result      (s2_result),
-        .i_asm_lo      (s2_asm_lo),
-        .i_mem_rdata   (i_mem_rdata),
-        .i_mem_rdata_b (i_mem_rdata_b),
-        .o_valid       (s3_valid),
-        .o_is_store    (s3_is_store),
-        .o_rd          (s3_rd),
-        .o_result      (s3_result)
+        .clk              (clk),
+        .rst              (rst),
+        .i_valid          (s2_valid),
+        .i_is_lsu         (s2_is_lsu),
+        .i_is_load        (s2_is_load),
+        .i_is_store       (s2_is_store),
+        .i_is_mask_op     (s2_is_mask_op),
+        .i_is_strided     (s2_is_strided),
+        .i_is_indexed     (s2_is_indexed),
+        .i_base_addr      (s2_base_addr),
+        .i_stride         (s2_stride),
+        .i_offset_buf     (s2_offset_buf),
+        .i_vs3_data       (s2_vs3_data),
+        .i_rd             (s2_rd),
+        .i_result         (s2_result),
+        .i_asm_lo         (s2_asm_lo),
+        .i_mem_rdata      (i_mem_rdata),
+        .i_mem_rdata_b    (i_mem_rdata_b),
+        .o_valid          (s3_valid),
+        .o_is_store       (s3_is_store),
+        .o_rd             (s3_rd),
+        .o_result         (s3_result),
+        .o_mem_addr       (mem_mem_addr),
+        .o_mem_read_en    (mem_mem_read_en),
+        .o_mem_write_en   (mem_mem_write_en),
+        .o_mem_wdata      (mem_mem_wdata),
+        .o_mem_byte_en    (mem_mem_byte_en),
+        .o_mem_addr_b     (mem_mem_addr_b),
+        .o_mem_read_en_b  (mem_mem_read_en_b),
+        .o_mem_write_en_b (mem_mem_write_en_b),
+        .o_mem_wdata_b    (mem_mem_wdata_b),
+        .o_mem_byte_en_b  (mem_mem_byte_en_b)
     );
 
     writeback stage4 (

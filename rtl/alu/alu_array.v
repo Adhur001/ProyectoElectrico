@@ -2,7 +2,7 @@ module alu_array #(
     parameter SIZE = 32,
     parameter N    = 4
 ) (
-    input  [2:0]        alu_op,
+    input  [3:0]        alu_op,
     input  [N*SIZE-1:0] in_a,
     input  [N*SIZE-1:0] in_b,
     output [N*SIZE-1:0] out

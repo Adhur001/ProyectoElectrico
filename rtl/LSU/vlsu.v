@@ -1,312 +1,139 @@
 // =============================================================================
-// Unidad de Carga y Almacenamiento Vectorial (VLSU)
-// Opcodes segun especificacion RVV:
-//   0000111 (LOAD-FP)  — cargas vectoriales
-//   0100111 (STORE-FP) — almacenamientos vectoriales
-// Instrucciones soportadas:
-//   Unit-stride:     VLE32.v, VL1RE32.v, VLM.v, VSE32.v, VS1R.v, VSM.v
-//   Constant-stride: VLSE32.v, VSSE32.v
-// =============================================================================
-
-
-// =============================================================================
-// DECODIFICADOR
-// Extrae y decodifica los campos de una instruccion RVV de 32 bits.
-// Logica puramente combinacional.
+// Generador combinacional de accesos LSU vectorial
 //
-// Formato (cargas y stores comparten posicion de campos):
-//  31   29 28  27   26 25 24      20 19   15 14  12 11     7 6      0
-// [ nf ] [mew][mop][vm][lumop/rs2 ][ rs1  ][width][vd/vs3 ][ opcode ]
+// Un vector de 128 bits contiene 4 elementos de 32 bits. El DCache tiene dos
+// puertos (A y B), por lo que se procesan 2 elementos por ciclo en 2 fases:
 //
-// mop encoding:
-//   00 = unit-stride   (bits[24:20] = lumop/sumop)
-//   10 = strided       (bits[24:20] = rs2, indice del registro de stride)
+//   i_phase = 2'b00 → ACCESS_01: elem_0 → puerto A,  elem_1 → puerto B
+//   i_phase = 2'b01 → ACCESS_23: elem_2 → puerto A,  elem_3 → puerto B
 //
-// lumop/sumop (mop=00): 00000=unit-stride  01000=whole-reg  01011=mask
-// =============================================================================
-
-module vlsu_decoder (
-    input  wire [31:0] i_instr,
-
-    output wire [4:0]  o_vd,              // registro vectorial destino (carga) / fuente (store)
-    output wire [4:0]  o_rs1,             // indice del registro escalar con la direccion base
-    output wire [4:0]  o_rs2,             // indice del registro escalar de stride (mop=10)
-    output wire [2:0]  o_width,           // EEW: 000=8b 101=16b 110=32b 111=64b
-    output wire        o_vm,              // 1=sin mascara, 0=enmascarado con v0
-    output wire [4:0]  o_lumop,           // lumop/sumop (mop=00) o rs2 idx (mop=10)
-    output wire [1:0]  o_mop,             // modo de direccionamiento
-    output wire [2:0]  o_nf,              // NFIELDS-1
-
-    // tipo de instruccion — unit-stride (mop=00)
-    output wire        o_is_load,         // opcode == 0000111
-    output wire        o_is_unit_stride,  // VLE<eew>.v   (load,  lumop=00000)
-    output wire        o_is_whole_reg,    // VL1RE32.v    (load,  lumop=01000)
-    output wire        o_is_mask_load,    // VLM.v        (load,  lumop=01011)
-    output wire        o_is_store,        // opcode == 0100111
-    output wire        o_is_unit_store,   // VSE<eew>.v   (store, sumop=00000)
-    output wire        o_is_whole_store,  // VS1R.v       (store, sumop=01000)
-    output wire        o_is_mask_store,   // VSM.v        (store, sumop=01011)
-
-    // tipo de instruccion — constant-stride (mop=10)
-    output wire        o_is_strided_load, // VLSE<eew>.v
-    output wire        o_is_strided_store // VSSE<eew>.v
-);
-
-    wire [6:0] opcode;
-    assign opcode = i_instr[6:0];
-
-    // Extraccion directa de campos
-    assign o_vd    = i_instr[11:7];
-    assign o_width = i_instr[14:12];
-    assign o_rs1   = i_instr[19:15];
-    assign o_rs2   = i_instr[24:20];  // rs2 idx (usado como stride en mop=10)
-    assign o_lumop = i_instr[24:20];  // mismo bits, alias semantico para mop=00
-    assign o_vm    = i_instr[25];
-    assign o_mop   = i_instr[27:26];
-    assign o_nf    = i_instr[31:29];
-
-    // Deteccion de opcode
-    assign o_is_load  = (opcode == 7'b0000111);
-    assign o_is_store = (opcode == 7'b0100111);
-
-    // Sub-tipos unit-stride (mop=00)
-    assign o_is_unit_stride = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b00000);
-    assign o_is_whole_reg   = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b01000);
-    assign o_is_mask_load   = o_is_load  && (o_mop == 2'b00) && (o_lumop == 5'b01011);
-    assign o_is_unit_store  = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b00000);
-    assign o_is_whole_store = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b01000);
-    assign o_is_mask_store  = o_is_store && (o_mop == 2'b00) && (o_lumop == 5'b01011);
-
-    // Constant-stride (mop=10)
-    assign o_is_strided_load  = o_is_load  && (o_mop == 2'b10);
-    assign o_is_strided_store = o_is_store && (o_mop == 2'b10);
-
-endmodule
-
-
-// =============================================================================
-// VLSU TOP
-//
-// Nota sobre rs1:
-//   Sin interfaz con el host, la direccion base llega como i_base_addr
-//   desde el testbench. Al integrar el host, i_base_addr se conectara
-//   a la salida del banco de registros escalares indexado por o_rs1.
-//
-// Nota sobre i_vrf_rdata / o_vs3:
-//   Para stores el VLSU necesita leer vs3 del banco de registros vectoriales.
-//   o_vs3 presenta el indice combinatorialmenete; i_vrf_rdata debe conectarse
-//   al puerto de lectura del VRF en ve_top. En el testbench se maneja directo.
+// El modulo upstream avanza i_phase entre ciclos. Este modulo solo traduce
+// la fase actual a senales de bus; no tiene estado interno.
+// i_en = 0 desactiva todos los enables de DCache.
 // =============================================================================
 
 module vlsu (
-    input  wire        clk,
-    input  wire        rst,
+    input  wire [1:0]   i_phase,      // 2'b00=ACCESS_01  2'b01=ACCESS_23
+    input  wire         i_en,         // habilita cualquier acceso a memoria
 
-    input  wire        i_valid,           // instruccion valida en la entrada
-    input  wire [31:0] i_instr,           // instruccion RVV de 32 bits
-    input  wire [31:0] i_base_addr,       // direccion base (simula rs1 del host)
-    input  wire [31:0] i_stride,          // stride en bytes (simula rs2, para VLSE/VSSE)
+    input  wire         i_is_load,
+    input  wire         i_is_store,
+    input  wire         i_is_mask_op, // solo accede al primer elemento de la fase
+    input  wire         i_is_strided,
+    input  wire         i_is_indexed,
 
-    // Interfaz con DCache
-    output wire [31:0] o_mem_addr,        // direccion de acceso
-    output wire        o_mem_read_en,     // habilita lectura combinacional (cargas)
-    input  wire [31:0] i_mem_rdata,       // dato leido desde DCache
-    output wire        o_mem_write_en,    // habilita escritura sincrona (stores)
-    output wire [31:0] o_mem_wdata,       // dato a escribir en DCache
-    output wire [3:0]  o_mem_byte_en,     // byte enables (VSM usa 4'b0001)
+    input  wire [31:0]  i_base_addr,
+    input  wire [31:0]  i_stride,
+    input  wire [127:0] i_offset_buf, // vs2: offsets para acceso indexado (un offset de 32b por elemento)
 
-    // Interfaz con banco de registros vectoriales
-    output wire        o_vrf_we,          // write enable (cargas: writeback)
-    output wire [4:0]  o_vrf_addr,        // indice del registro destino
-    output wire [127:0] o_vrf_data,       // dato de 128 bits a escribir
-    input  wire [127:0] i_vrf_rdata,      // dato de 128 bits leido de vs3 (stores)
-    output wire [4:0]   o_vs3,            // indice del registro fuente para stores
+    input  wire [127:0] i_wdata,      // vs3: datos a escribir en stores (4 palabras de 32b empaquetadas)
 
-    // Interfaz con scoreboard (en ve_top)
-    output wire        o_busy,            // VLSU ocupado
-    output wire        o_scoreboard_set,  // pulso: marcar vd como ocupado (cargas)
-    output wire        o_scoreboard_clr,  // pulso: liberar vd al terminar carga
-    output wire [4:0]  o_vd              // registro destino reclamado (cargas)
+    // Interfaz con DCache — puerto A (elemento par de cada fase)
+    output reg  [31:0]  o_mem_addr,
+    output reg          o_mem_read_en,
+    output reg          o_mem_write_en,
+    output reg  [31:0]  o_mem_wdata,
+    output reg  [3:0]   o_mem_byte_en,
+
+    // Interfaz con DCache — puerto B (elemento impar de cada fase)
+    output reg  [31:0]  o_mem_addr_b,
+    output reg          o_mem_read_en_b,
+    output reg          o_mem_write_en_b,
+    output reg  [31:0]  o_mem_wdata_b,
+    output reg  [3:0]   o_mem_byte_en_b
 );
 
     // -------------------------------------------------------------------------
-    // Instancia del decodificador
+    // Calculo de direcciones para los 4 elementos
+    //
+    // step: salto entre elementos consecutivos en bytes.
+    //   - Strided:    usa i_stride (puede ser cualquier valor, incluso negativo)
+    //   - Unit-stride e indexed: 4 bytes (un word de 32b)
+    //
+    // Modos de direccionamiento:
+    //   - Unit-stride: base, base+4,        base+8,        base+12
+    //   - Strided:     base, base+stride,   base+stride*2, base+stride*3
+    //   - Indexed:     base+offset[0],      base+offset[1], ...  (offsets de vs2)
+    //
+    // Las cuatro direcciones se calculan siempre; el case del bloque always
+    // selecciona cuales enviar al DCache segun la fase activa.
     // -------------------------------------------------------------------------
-    wire [4:0]  dec_vd;
-    wire        dec_is_load;
-    wire        dec_is_store;
-    wire        dec_is_mask_load;
-    wire        dec_is_mask_store;
-    wire        dec_is_strided_load;
-    wire        dec_is_strided_store;
 
-    vlsu_decoder decoder (
-        .i_instr            (i_instr),
-        .o_vd               (dec_vd),
-        .o_rs1              (),
-        .o_rs2              (),
-        .o_width            (),
-        .o_vm               (),
-        .o_lumop            (),
-        .o_mop              (),
-        .o_nf               (),
-        .o_is_load          (dec_is_load),
-        .o_is_unit_stride   (),
-        .o_is_whole_reg     (),
-        .o_is_mask_load     (dec_is_mask_load),
-        .o_is_store         (dec_is_store),
-        .o_is_unit_store    (),
-        .o_is_whole_store   (),
-        .o_is_mask_store    (dec_is_mask_store),
-        .o_is_strided_load  (dec_is_strided_load),
-        .o_is_strided_store (dec_is_strided_store)
-    );
+    wire [31:0] step = i_is_strided ? i_stride : 32'd4;
 
-    wire dec_valid_instr = dec_is_load || dec_is_store;
-    wire dec_is_mask_op  = dec_is_mask_load || dec_is_mask_store;
+    wire [31:0] addr_0 = i_is_indexed ? (i_base_addr + i_offset_buf[31:0])   : i_base_addr;
+    wire [31:0] addr_1 = i_is_indexed ? (i_base_addr + i_offset_buf[63:32])  : (i_base_addr + step);
+    wire [31:0] addr_2 = i_is_indexed ? (i_base_addr + i_offset_buf[95:64])  : (i_base_addr + step * 2);
+    wire [31:0] addr_3 = i_is_indexed ? (i_base_addr + i_offset_buf[127:96]) : (i_base_addr + step * 3);
 
     // -------------------------------------------------------------------------
-    // Estados de la FSM
+    // Generacion de senales de control segun fase
     // -------------------------------------------------------------------------
-    localparam IDLE      = 4'd0;
-    localparam ACCESS_0  = 4'd1;  // carga: lee mem[base+0]   → asm_buf[31:0]
-    localparam ACCESS_1  = 4'd2;  // carga: lee mem[base+4]   → asm_buf[63:32]
-    localparam ACCESS_2  = 4'd3;  // carga: lee mem[base+8]   → asm_buf[95:64]
-    localparam ACCESS_3  = 4'd4;  // carga: lee mem[base+12]  → asm_buf[127:96]
-    localparam WRITEBACK = 4'd5;  // carga: escribe asm_buf al VRF
-    localparam SWRITE_0  = 4'd6;  // store: escribe asm_buf[31:0]   → mem[base+0]
-    localparam SWRITE_1  = 4'd7;  // store: escribe asm_buf[63:32]  → mem[base+4]
-    localparam SWRITE_2  = 4'd8;  // store: escribe asm_buf[95:64]  → mem[base+8]
-    localparam SWRITE_3  = 4'd9;  // store: escribe asm_buf[127:96] → mem[base+12]
 
-    // -------------------------------------------------------------------------
-    // Registros internos
-    // -------------------------------------------------------------------------
-    reg [3:0]   state;
-    reg [4:0]   vd_reg;           // destino (carga) o fuente (store)
-    reg [31:0]  base_addr_reg;    // direccion base capturada al inicio
-    reg [31:0]  stride_reg;       // stride en bytes capturado al inicio (VLSE/VSSE)
-    reg         is_mask_reg;      // operacion de mascara (VLM / VSM)
-    reg         is_store_reg;     // indica que la operacion activa es un store
-    reg         is_strided_reg;   // indica modo constant-stride (mop=10)
-    reg [127:0] asm_buf;          // buffer de 128 bits (ensamblaje en carga, diseccion en store)
+    always @(*) begin
+        // Defaults: ambos puertos desactivados (i_en=0 o fase invalida)
+        o_mem_addr       = 32'b0;
+        o_mem_read_en    = 1'b0;
+        o_mem_write_en   = 1'b0;
+        o_mem_wdata      = 32'b0;
+        o_mem_byte_en    = 4'b1111;
 
-    // -------------------------------------------------------------------------
-    // Logica secuencial
-    // -------------------------------------------------------------------------
-    always @(posedge clk) begin
-        if (rst) begin
-            state         <= IDLE;
-            vd_reg        <= 5'b0;
-            base_addr_reg <= 32'b0;
-            stride_reg    <= 32'b0;
-            is_mask_reg   <= 1'b0;
-            is_store_reg  <= 1'b0;
-            is_strided_reg<= 1'b0;
-            asm_buf       <= 128'b0;
-        end else begin
-            case (state)
-                IDLE: begin
-                    if (i_valid && dec_valid_instr) begin
-                        vd_reg         <= dec_vd;
-                        base_addr_reg  <= i_base_addr;
-                        stride_reg     <= i_stride;
-                        is_mask_reg    <= dec_is_mask_op;
-                        is_store_reg   <= dec_is_store;
-                        is_strided_reg <= dec_is_strided_load || dec_is_strided_store;
-                        if (dec_is_store) begin
-                            // captura los 128 bits de vs3 desde el VRF (lectura combinacional)
-                            asm_buf <= i_vrf_rdata;
-                            state   <= SWRITE_0;
-                        end else begin
-                            state   <= ACCESS_0;
-                        end
-                    end
+        o_mem_addr_b     = 32'b0;
+        o_mem_read_en_b  = 1'b0;
+        o_mem_write_en_b = 1'b0;
+        o_mem_wdata_b    = 32'b0;
+        o_mem_byte_en_b  = 4'b1111;
+
+        if (i_en) begin
+            case (i_phase)
+
+                // -------------------------------------------------------------
+                // ACCESS_01: accede a elem_0 (puerto A) y elem_1 (puerto B)
+                //
+                // Con i_is_mask_op solo se accede a elem_0:
+                //   - Puerto B queda desactivado (read/write_en = 0)
+                //   - byte_en del puerto A se reduce a 4'b0001 (solo byte 0)
+                // -------------------------------------------------------------
+                2'b00: begin
+                    // Puerto A → elem_0
+                    o_mem_addr        = addr_0;
+                    o_mem_read_en     = i_is_load;
+                    o_mem_write_en    = i_is_store;
+                    o_mem_wdata       = i_wdata[31:0];
+                    o_mem_byte_en     = i_is_mask_op ? 4'b0001 : 4'b1111;
+
+                    // Puerto B → elem_1 (desactivado si mask_op)
+                    o_mem_addr_b      = addr_1;
+                    o_mem_read_en_b   = i_is_load  && !i_is_mask_op;
+                    o_mem_write_en_b  = i_is_store && !i_is_mask_op;
+                    o_mem_wdata_b     = i_wdata[63:32];
+                    o_mem_byte_en_b   = 4'b1111;
                 end
 
-                // --- Estados de carga ---
-                ACCESS_0: begin
-                    asm_buf[31:0] <= i_mem_rdata;
-                    state <= is_mask_reg ? WRITEBACK : ACCESS_1;
-                end
-                ACCESS_1: begin
-                    asm_buf[63:32] <= i_mem_rdata;
-                    state          <= ACCESS_2;
-                end
-                ACCESS_2: begin
-                    asm_buf[95:64] <= i_mem_rdata;
-                    state          <= ACCESS_3;
-                end
-                ACCESS_3: begin
-                    asm_buf[127:96] <= i_mem_rdata;
-                    state           <= WRITEBACK;
-                end
-                WRITEBACK: begin
-                    state <= IDLE;
+                // -------------------------------------------------------------
+                // ACCESS_23: accede a elem_2 (puerto A) y elem_3 (puerto B)
+                //
+                // Ambos puertos siempre activos; mask_op solo afecta ACCESS_01.
+                // -------------------------------------------------------------
+                2'b01: begin
+                    // Puerto A → elem_2
+                    o_mem_addr        = addr_2;
+                    o_mem_read_en     = i_is_load;
+                    o_mem_write_en    = i_is_store;
+                    o_mem_wdata       = i_wdata[95:64];
+                    o_mem_byte_en     = 4'b1111;
+
+                    // Puerto B → elem_3
+                    o_mem_addr_b      = addr_3;
+                    o_mem_read_en_b   = i_is_load;
+                    o_mem_write_en_b  = i_is_store;
+                    o_mem_wdata_b     = i_wdata[127:96];
+                    o_mem_byte_en_b   = 4'b1111;
                 end
 
-                // --- Estados de store ---
-                SWRITE_0: begin
-                    // VSM: solo 1 escritura (byte bajo de la mascara)
-                    state <= is_mask_reg ? IDLE : SWRITE_1;
-                end
-                SWRITE_1: state <= SWRITE_2;
-                SWRITE_2: state <= SWRITE_3;
-                SWRITE_3: state <= IDLE;
-
-                default: state <= IDLE;
+                default: ; // fase invalida con i_en=1 → puertos desactivados por defaults
             endcase
         end
     end
-
-    // -------------------------------------------------------------------------
-    // Logica combinacional: DCache
-    // -------------------------------------------------------------------------
-    // step: 4 bytes fijos para unit-stride, stride_reg para constant-stride
-    wire [31:0] step = is_strided_reg ? stride_reg : 32'd4;
-
-    assign o_mem_addr =
-        (state == ACCESS_0 || state == SWRITE_0) ? base_addr_reg             :
-        (state == ACCESS_1 || state == SWRITE_1) ? base_addr_reg + step      :
-        (state == ACCESS_2 || state == SWRITE_2) ? base_addr_reg + (step*2)  :
-        (state == ACCESS_3 || state == SWRITE_3) ? base_addr_reg + (step*3)  :
-        32'b0;
-
-    assign o_mem_read_en  = (state == ACCESS_0) || (state == ACCESS_1) ||
-                            (state == ACCESS_2) || (state == ACCESS_3);
-
-    assign o_mem_write_en = (state == SWRITE_0) || (state == SWRITE_1) ||
-                            (state == SWRITE_2) || (state == SWRITE_3);
-
-    // VSM escribe solo el byte bajo de la mascara
-    assign o_mem_byte_en = (is_mask_reg && state == SWRITE_0) ? 4'b0001 : 4'b1111;
-
-    assign o_mem_wdata =
-        (state == SWRITE_0) ? asm_buf[31:0]   :
-        (state == SWRITE_1) ? asm_buf[63:32]  :
-        (state == SWRITE_2) ? asm_buf[95:64]  :
-        (state == SWRITE_3) ? asm_buf[127:96] :
-        32'b0;
-
-    // -------------------------------------------------------------------------
-    // Logica combinacional: banco de registros vectoriales
-    // -------------------------------------------------------------------------
-    assign o_vrf_we   = (state == WRITEBACK);
-    assign o_vrf_addr = vd_reg;
-    assign o_vrf_data = is_mask_reg ? {120'b0, asm_buf[7:0]} : asm_buf;
-
-    // o_vs3: presenta el indice de vs3 combinacionalmente en IDLE para que
-    // i_vrf_rdata este listo antes del flanco que captura asm_buf
-    assign o_vs3 = (state == IDLE) ? dec_vd : vd_reg;
-
-    // -------------------------------------------------------------------------
-    // Logica combinacional: scoreboard
-    // Solo las cargas reclaman un registro destino
-    // -------------------------------------------------------------------------
-    assign o_scoreboard_set = (state == IDLE) && i_valid && dec_is_load;
-    assign o_scoreboard_clr = (state == WRITEBACK);
-
-    assign o_busy = (state != IDLE);
-    assign o_vd   = vd_reg;
 
 endmodule

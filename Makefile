@@ -4,7 +4,7 @@ FLAGS    = -g2012
 
 RTL_ALU     = rtl/alu/alu.v rtl/alu/alu_array.v
 RTL_REG     = rtl/vregfile/vregisters.v
-RTL_PIPE    = rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/mem.v rtl/pipeline/writeback.v
+RTL_PIPE    = rtl/pipeline/hazard_unit.v rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/mem.v rtl/pipeline/writeback.v
 RTL_LSU     = rtl/LSU/vlsu.v
 RTL_TOP     = rtl/ve_top.v
 RTL_DECODE  = risc-v_RV32I/Modified_DecodeUnit.v

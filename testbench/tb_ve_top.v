@@ -216,6 +216,22 @@ module tb_ve_top;
         end
     endtask
 
+    // Envia dos instrucciones consecutivas (gap de 1 ciclo) y espera que B complete.
+    // Cuando B tiene dependencia RAW con A, la hazard unit inserta 3 burbujas automaticamente.
+    task send_raw_consecutive;
+        input [31:0] instr_a;
+        input [31:0] instr_b;
+        begin
+            @(posedge clk); #1;
+            du_i_instr = instr_a;
+            @(posedge clk); #1;
+            du_i_instr = instr_b;
+            @(posedge clk); #1;
+            du_i_instr = 32'h0000_0013;
+            repeat(9) @(posedge clk); #1;
+        end
+    endtask
+
     task check_mem;
         input [6:0]  addr;
         input [31:0] expected;
@@ -428,6 +444,38 @@ module tb_ve_top;
         int_rf[1] = 32'd114;
         send_store(32'h02B0_88A7);
         check_mem(7'd114, 32'h0000_0078);
+
+        // =====================================================================
+        // Tests RAW hazard — instrucciones back-to-back con dependencia de datos
+        // =====================================================================
+
+        // TEST RAW-1: VADD v20=v1+v2, luego inmediatamente VADD v21=v20+v1
+        //   v1={4{0xA}}, v2 restaurado a {4{0x14}}
+        //   A: v20 = v1 + v2 = {4{0x1E}}
+        //   B: v21 = v20 + v1 = {4{0x28}} (usa resultado fresco de A)
+        //   Sin hazard unit: v21 leeria v20 stale → resultado incorrecto
+        $display("\nTest RAW-1: back-to-back VADD con dependencia RAW en v20");
+        dut.vregfile.regs[2]  = {4{32'h14}};
+        dut.vregfile.regs[20] = 128'hDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEF;
+        // VADD v20 = v1 + v2: 0x0020_8A57
+        // VADD v21 = v20 + v1: 0x001A_0AD7
+        send_raw_consecutive(32'h0020_8A57, 32'h001A_0AD7);
+        check_reg(5'd20, {4{32'h1E}});
+        check_reg(5'd21, {4{32'h28}});
+
+        // TEST RAW-2: VADD v22=v1+v2, luego VSUB v23=v22-v1
+        //   v1={4{0xA}}, v2={4{0x14}}
+        //   A: v22 = v1 + v2 = {4{0x1E}}
+        //   B: v23 = v22 - v1 = {4{0x14}}
+        $display("\nTest RAW-2: back-to-back VADD/VSUB con dependencia RAW en v22");
+        dut.vregfile.regs[22] = 128'hDEAD_BEEF_DEAD_BEEF_DEAD_BEEF_DEAD_BEEF;
+        // VADD v22 = v1 + v2: rd=22=10110, rs1=v1=00001, rs2=v2=00010
+        // 0000000_00010_00001_000_10110_1010111 = 0x0020_8B57
+        // VSUB v23 = v22 - v1: funct7=0100000, rd=23=10111, rs1=v22=10110, rs2=v1=00001
+        // 0100000_00001_10110_000_10111_1010111 = 0x401B_0BD7
+        send_raw_consecutive(32'h0020_8B57, 32'h401B_0BD7);
+        check_reg(5'd22, {4{32'h1E}});
+        check_reg(5'd23, {4{32'h14}});
 
         $display("\n=== Results: %0d passed, %0d failed ===", pass, fail);
         $finish;

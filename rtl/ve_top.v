@@ -101,12 +101,33 @@ module ve_top (
     wire [127:0] s3_result;
 
     // =========================================================================
-    // Logica de stall: conflicto de DCache entre Execute y MEM
-    // Se activa cuando ambas etapas tendrian un LSU activo al mismo tiempo.
-    // Execute inserta burbuja; Issue mantiene su registro.
+    // Logica de stall: DCache conflict (Execute vs MEM) y RAW hazard
+    // dcache_stall: ambas etapas tendrian LSU activo — Execute congela su input (i_stall).
+    // raw_stall:    instruccion entrante lee registro escrito por instruccion en pipeline
+    //               — Issue inserta burbuja (i_raw_stall), productor avanza normalmente.
     // =========================================================================
-    wire stall = s1_is_lsu && s2_is_lsu;
+    wire dcache_stall = s1_is_lsu && s2_is_lsu;
+    wire raw_stall;
+    wire stall = dcache_stall || raw_stall;
     assign o_stall = stall;
+
+    hazard_unit hu (
+        .i_valid      (i_alu_valid || i_lsu_valid),
+        .i_rs1        (i_rs1),
+        .i_rs2        (i_rs2),
+        .i_is_store   (i_is_store),
+        .i_rd         (i_rd),
+        .i_s1_valid   (s1_valid),
+        .i_s1_rd      (s1_rd),
+        .i_s1_is_store(s1_is_store),
+        .i_s2_valid   (s2_valid),
+        .i_s2_rd      (s2_rd),
+        .i_s2_is_store(s2_is_store),
+        .i_s3_valid   (s3_valid),
+        .i_s3_rd      (s3_rd),
+        .i_s3_is_store(s3_is_store),
+        .o_raw_stall  (raw_stall)
+    );
 
     // =========================================================================
     // Mux de salidas DCache: Execute (ACCESS_01) o MEM (ACCESS_23)
@@ -143,7 +164,8 @@ module ve_top (
     issue stage1 (
         .clk          (clk),
         .rst          (rst),
-        .i_stall      (stall),
+        .i_stall      (dcache_stall),
+        .i_raw_stall  (raw_stall),
         .i_alu_valid  (i_alu_valid),
         .i_funct7     (i_funct7),
         .i_funct3     (i_funct3),
@@ -188,7 +210,7 @@ module ve_top (
     execute stage2 (
         .clk          (clk),
         .rst          (rst),
-        .i_stall      (stall),
+        .i_stall      (dcache_stall),
         .i_valid      (s1_valid),
         .i_is_lsu     (s1_is_lsu),
         .i_alu_op     (s1_alu_op),

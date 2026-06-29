@@ -2,15 +2,15 @@ IVERILOG = iverilog
 VVP      = vvp
 FLAGS    = -g2012
 
-RTL_ALU     = rtl/alu/alu.v rtl/alu/alu_array.v
-RTL_REG     = rtl/vregfile/vregisters.v
-RTL_PIPE    = rtl/pipeline/hazard_unit.v rtl/pipeline/issue.v rtl/pipeline/execute.v rtl/pipeline/mem.v rtl/pipeline/writeback.v
-RTL_LSU     = rtl/LSU/vlsu.v
-RTL_TOP     = rtl/ve_top.v
+RTL_ALU     = rtl_ve/alu/alu.v rtl_ve/alu/alu_array.v
+RTL_REG     = rtl_ve/vregfile/vregisters.v
+RTL_PIPE    = rtl_ve/pipeline/hazard_unit.v rtl_ve/pipeline/issue.v rtl_ve/pipeline/execute.v rtl_ve/pipeline/mem.v rtl_ve/pipeline/writeback.v
+RTL_LSU     = rtl_ve/lsu/vlsu.v
+RTL_TOP     = rtl_ve/ve_top.v
 RTL_DECODE  = risc-v_RV32I/core/Modified_DecodeUnit.v
 RTL_ALL     = $(RTL_ALU) $(RTL_REG) $(RTL_PIPE) $(RTL_LSU) $(RTL_TOP)
 RTL_SCALAR  = risc-v_RV32I/core/FetchUnit.v risc-v_RV32I/core/RegisterFile.v risc-v_RV32I/memory/ICache.v risc-v_RV32I/core/ExecuteUnit.v risc-v_RV32I/core/MemoryUnit.v risc-v_RV32I/core/WriteBack.v risc-v_RV32I/core/Modified_DecodeUnit.v
-RTL_INTEGRATED = $(RTL_ALL) $(RTL_SCALAR) risc-v_RV32I/memory/DCache.v rtl/ve_integrated.v
+RTL_INTEGRATED = $(RTL_ALL) $(RTL_SCALAR) risc-v_RV32I/memory/DCache.v rtl_ve/ve_integrated.v
 
 .PHONY: all tb_alu tb_vregfile tb_ve_top tb_vlsu_integration tb_ve_integrated clean
 

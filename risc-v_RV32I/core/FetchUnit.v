@@ -1,6 +1,6 @@
 // --------------------------------------------------------------------------------------------------------------
 // -- File Name        : FetchUnit.v
-// -- Module Name      : fetch                                         
+// -- Module Name      : fetch
 // -- Developers       : Kristhel Quesada, David Rodriguez
 // --
 // -- Description      : Instruction Fetch Unit
@@ -8,12 +8,12 @@
 // --                      [x] Read instructions from memory (32 bits)
 // --                      [x] Redirect PC if there's a jump or branch instruction
 // --                      [ ] Branch Predictor
-// --                      [ ] Stall management
+// --                      [x] Stall management // Cambio
 // --
-// -- Tested on        : 
+// -- Tested on        :
 // -- Last modified on : March-2025
-// -- Notes            : 
-// --                  
+// -- Notes            :
+// --
 // -- Copyright        : Refer to LICENSE.md.
 // --------------------------------------------------------------------------------------------------------------
 
@@ -25,6 +25,7 @@ module fetch #(
 )(
     // General Connections
     input wire CLK, RST,
+    input wire STALL,                       // Cambio
 
     // Fetch-ICache Connections
     input wire [ILEN-1:0] i_instruction,    // Instruction fetched from ICache
@@ -57,7 +58,8 @@ always @(posedge CLK) begin
         o_pc          <= 0;
         o_pc_imem     <= INITIAL_PC;
         o_instruction <= 0;
-
+        o_bubble      <= 0;                  // Cambio
+    end else if (STALL) begin                // Cambio
     end else begin
 
         if (i_take_br | i_take_jmp) begin
@@ -67,7 +69,7 @@ always @(posedge CLK) begin
             o_bubble      <= 1;                  // Signal to say to de DU to make a NOT
 
         end else begin
-            
+
             if (o_bubble) begin
                 o_instruction <= 0;              // NOP if bubble still on
                 o_pc          <= 0;              // NOP if bubble still on

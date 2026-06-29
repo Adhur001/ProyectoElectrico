@@ -7,10 +7,10 @@
 // --                    [x] Asynchronous read
 // --                    [ ] Synchronous write
 // --
-// -- Tested on        : 
+// -- Tested on        :
 // -- Last modified on :
-// -- Notes            : 
-// --                  
+// -- Notes            :
+// --
 // -- Copyright        : Refer to LICENSE.md.
 // ------------------------------------------------------------------------------------------------------------
 
@@ -18,7 +18,7 @@ module regFile #(
    parameter REGPC_INIT =  32'h0000_0000,    // Init PC on reset
    parameter XLEN = 32,
    parameter ILEN = 32
-)(   
+)(
    // General
    input wire        CLK, RST,               // Clock and Reset
 
@@ -34,10 +34,9 @@ module regFile #(
    input wire        i_we,                   // Flag to enable writing
    input wire [4:0]  i_wb_rf_addr,           // Address of the rd register
    input wire [31:0] i_wb_rf_rslt            // Data to store in the rd register
-
 );
 
-// Cable to conect x0 to GND. To avoid changes on x0.  
+// Cable to conect x0 to GND. To avoid changes on x0.
 wire [XLEN-1:0] x0;
 assign x0 = 32'h0000_0000;
 
@@ -85,7 +84,7 @@ always @(posedge CLK) begin
       x3  = 32'h0000_0003;    // gp 3
       x4  = 32'h0000_0004;    // tp 4
       x5  = 32'h0000_0005;    // t0 5
-      x6  = 32'h0000_0006;    // t1 
+      x6  = 32'h0000_0006;    // t1
       x7  = 32'h0000_0007;    // t2
       x8  = 32'h0000_0008;    // [address] s0
       x9  = 32'h0000_0009;    // s1
@@ -111,10 +110,7 @@ always @(posedge CLK) begin
       x29 = 32'h0000_001d;    // t4
       x30 = 32'h0000_001e;    // t5
       x31 = 32'h0000_001f;    // t6
-      o_rs1_data <= x0;
-      o_rs2_data <= x0;
-
-   end else begin
+   end else begin             // Cambio
       if (i_we) begin
          case (i_wb_rf_addr)
             5'b00001 : x1  <= i_wb_rf_rslt;
@@ -156,80 +152,81 @@ end
 // ------------------------------------
 // Read Logic
 // ------------------------------------
-always @(posedge CLK) begin 
+always @(*) begin // Cambio
    case (i_rs1_addr)
-      5'b00000 : o_rs1_data <= x0;
-      5'b00001 : o_rs1_data <= x1;
-      5'b00010 : o_rs1_data <= x2;
-      5'b00011 : o_rs1_data <= x3;
-      5'b00100 : o_rs1_data <= x4;
-      5'b00101 : o_rs1_data <= x5;
-      5'b00110 : o_rs1_data <= x6;
-      5'b00111 : o_rs1_data <= x7;
-      5'b01000 : o_rs1_data <= x8;
-      5'b01001 : o_rs1_data <= x9;
-      5'b01010 : o_rs1_data <= x10;
-      5'b01011 : o_rs1_data <= x11;
-      5'b01100 : o_rs1_data <= x12;
-      5'b01101 : o_rs1_data <= x13;
-      5'b01110 : o_rs1_data <= x14;
-      5'b01111 : o_rs1_data <= x15;
-      5'b10000 : o_rs1_data <= x16;
-      5'b10001 : o_rs1_data <= x17;
-      5'b10010 : o_rs1_data <= x18;
-      5'b10011 : o_rs1_data <= x19;
-      5'b10100 : o_rs1_data <= x20;
-      5'b10101 : o_rs1_data <= x21;
-      5'b10110 : o_rs1_data <= x22;
-      5'b10111 : o_rs1_data <= x23;
-      5'b11000 : o_rs1_data <= x24;
-      5'b11001 : o_rs1_data <= x25;
-      5'b11010 : o_rs1_data <= x26;
-      5'b11011 : o_rs1_data <= x27;
-      5'b11100 : o_rs1_data <= x28;
-      5'b11101 : o_rs1_data <= x29;
-      5'b11110 : o_rs1_data <= x30;
-      5'b11111 : o_rs1_data <= x31;
+      5'b00000 : o_rs1_data = x0;  // Cambio
+      5'b00001 : o_rs1_data = x1;  // Cambio
+      5'b00010 : o_rs1_data = x2;  // Cambio
+      5'b00011 : o_rs1_data = x3;  // Cambio
+      5'b00100 : o_rs1_data = x4;  // Cambio
+      5'b00101 : o_rs1_data = x5;  // Cambio
+      5'b00110 : o_rs1_data = x6;  // Cambio
+      5'b00111 : o_rs1_data = x7;  // Cambio
+      5'b01000 : o_rs1_data = x8;  // Cambio
+      5'b01001 : o_rs1_data = x9;  // Cambio
+      5'b01010 : o_rs1_data = x10; // Cambio
+      5'b01011 : o_rs1_data = x11; // Cambio
+      5'b01100 : o_rs1_data = x12; // Cambio
+      5'b01101 : o_rs1_data = x13; // Cambio
+      5'b01110 : o_rs1_data = x14; // Cambio
+      5'b01111 : o_rs1_data = x15; // Cambio
+      5'b10000 : o_rs1_data = x16; // Cambio
+      5'b10001 : o_rs1_data = x17; // Cambio
+      5'b10010 : o_rs1_data = x18; // Cambio
+      5'b10011 : o_rs1_data = x19; // Cambio
+      5'b10100 : o_rs1_data = x20; // Cambio
+      5'b10101 : o_rs1_data = x21; // Cambio
+      5'b10110 : o_rs1_data = x22; // Cambio
+      5'b10111 : o_rs1_data = x23; // Cambio
+      5'b11000 : o_rs1_data = x24; // Cambio
+      5'b11001 : o_rs1_data = x25; // Cambio
+      5'b11010 : o_rs1_data = x26; // Cambio
+      5'b11011 : o_rs1_data = x27; // Cambio
+      5'b11100 : o_rs1_data = x28; // Cambio
+      5'b11101 : o_rs1_data = x29; // Cambio
+      5'b11110 : o_rs1_data = x30; // Cambio
+      5'b11111 : o_rs1_data = x31; // Cambio
+      default  : o_rs1_data = x0;  // Cambio
    endcase
 
    case (i_rs2_addr)
-      5'b00000 : o_rs2_data <= x0;
-      5'b00001 : o_rs2_data <= x1;
-      5'b00010 : o_rs2_data <= x2;
-      5'b00011 : o_rs2_data <= x3;
-      5'b00100 : o_rs2_data <= x4;
-      5'b00101 : o_rs2_data <= x5;
-      5'b00110 : o_rs2_data <= x6;
-      5'b00111 : o_rs2_data <= x7;
-      5'b01000 : o_rs2_data <= x8;
-      5'b01001 : o_rs2_data <= x9;
-      5'b01010 : o_rs2_data <= x10;
-      5'b01011 : o_rs2_data <= x11;
-      5'b01100 : o_rs2_data <= x12;
-      5'b01101 : o_rs2_data <= x13;
-      5'b01110 : o_rs2_data <= x14;
-      5'b01111 : o_rs2_data <= x15;
-      5'b10000 : o_rs2_data <= x16;
-      5'b10001 : o_rs2_data <= x17;
-      5'b10010 : o_rs2_data <= x18;
-      5'b10011 : o_rs2_data <= x19;
-      5'b10100 : o_rs2_data <= x20;
-      5'b10101 : o_rs2_data <= x21;
-      5'b10110 : o_rs2_data <= x22;
-      5'b10111 : o_rs2_data <= x23;
-      5'b11000 : o_rs2_data <= x24;
-      5'b11001 : o_rs2_data <= x25;
-      5'b11010 : o_rs2_data <= x26;
-      5'b11011 : o_rs2_data <= x27;
-      5'b11100 : o_rs2_data <= x28;
-      5'b11101 : o_rs2_data <= x29;
-      5'b11110 : o_rs2_data <= x30;
-      5'b11111 : o_rs2_data <= x31;
+      5'b00000 : o_rs2_data = x0;  // Cambio
+      5'b00001 : o_rs2_data = x1;  // Cambio
+      5'b00010 : o_rs2_data = x2;  // Cambio
+      5'b00011 : o_rs2_data = x3;  // Cambio
+      5'b00100 : o_rs2_data = x4;  // Cambio
+      5'b00101 : o_rs2_data = x5;  // Cambio
+      5'b00110 : o_rs2_data = x6;  // Cambio
+      5'b00111 : o_rs2_data = x7;  // Cambio
+      5'b01000 : o_rs2_data = x8;  // Cambio
+      5'b01001 : o_rs2_data = x9;  // Cambio
+      5'b01010 : o_rs2_data = x10; // Cambio
+      5'b01011 : o_rs2_data = x11; // Cambio
+      5'b01100 : o_rs2_data = x12; // Cambio
+      5'b01101 : o_rs2_data = x13; // Cambio
+      5'b01110 : o_rs2_data = x14; // Cambio
+      5'b01111 : o_rs2_data = x15; // Cambio
+      5'b10000 : o_rs2_data = x16; // Cambio
+      5'b10001 : o_rs2_data = x17; // Cambio
+      5'b10010 : o_rs2_data = x18; // Cambio
+      5'b10011 : o_rs2_data = x19; // Cambio
+      5'b10100 : o_rs2_data = x20; // Cambio
+      5'b10101 : o_rs2_data = x21; // Cambio
+      5'b10110 : o_rs2_data = x22; // Cambio
+      5'b10111 : o_rs2_data = x23; // Cambio
+      5'b11000 : o_rs2_data = x24; // Cambio
+      5'b11001 : o_rs2_data = x25; // Cambio
+      5'b11010 : o_rs2_data = x26; // Cambio
+      5'b11011 : o_rs2_data = x27; // Cambio
+      5'b11100 : o_rs2_data = x28; // Cambio
+      5'b11101 : o_rs2_data = x29; // Cambio
+      5'b11110 : o_rs2_data = x30; // Cambio
+      5'b11111 : o_rs2_data = x31; // Cambio
+      default  : o_rs2_data = x0;  // Cambio
    endcase
 end
 
-
 endmodule
 //---------------------------------------------------------------------------------------------------------------
-//                                    R E G I S T E R     F I L E                                  
+//                                    R E G I S T E R     F I L E
 //---------------------------------------------------------------------------------------------------------------

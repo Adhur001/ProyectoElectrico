@@ -9,10 +9,10 @@
 // --                    [ ] Support diffenrent sizes word, half and byte
 // --                    [ ] Sign extension when needed
 // --
-// -- Tested on        : 
+// -- Tested on        :
 // -- Last modified on :
-// -- Notes            : 
-// --                  
+// -- Notes            :
+// --
 // -- Copyright        : Refer to LICENSE.md.
 // ----------------------------------------------------------------------------------------
 
@@ -59,7 +59,7 @@ localparam WORD = 2'b11;
 //==========================================================
 function [3:0] byte_en_cod;
    input [1:0] data_size;
-   
+
    begin
       if (data_size == BYTE) byte_en_cod = 4'b0001;
       else if (data_size == HALF) byte_en_cod = 4'b0011;
@@ -90,7 +90,7 @@ always @(posedge clk or posedge reset) begin
       o_wb_sel        <= i_dmem_read;
       o_rd_addr       <= i_rd_addr;
       o_alu_result    <= i_alu_result;
-      o_write_on_reg  <= i_write_on_reg;      
+      o_write_on_reg  <= i_write_on_reg;
    end
 end
 
@@ -131,5 +131,5 @@ end
 
 endmodule
 //-----------------------------------------------------------------------------------------
-//                              M E M O R Y   U N I T                        
+//                              M E M O R Y   U N I T
 //-----------------------------------------------------------------------------------------

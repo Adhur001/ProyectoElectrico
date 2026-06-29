@@ -8,10 +8,10 @@
 // --                    [ ] Multiplexor to choose from source: MEM, EXU or FU (jal)
 // --                    [ ] Write management to RF: write_enable but never in x0
 // --
-// -- Tested on        : 
+// -- Tested on        :
 // -- Last modified on :
-// -- Notes            : 
-// --                  
+// -- Notes            :
+// --
 // -- Copyright        : Refer to LICENSE.md.
 // ------------------------------------------------------------------------------------------------------------
 
@@ -19,7 +19,7 @@ module wb_unit #(
    parameter REGPC_INIT =  32'h0000_0000,    // Init PC on reset
    parameter XLEN = 32,
    parameter ILEN = 32
-)( 
+)(
    // General
    input clk, rst,
 
